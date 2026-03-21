@@ -39,7 +39,13 @@ Options:
 Input JSON fields:
   mark      Managed pane mark.
   pane_id   Managed pane ID.
-  log_file  Fresh log file currently receiving pane output.
+  log_file  Managed pane log file currently receiving pane output.
+
+Behavior:
+  - Commands must return control to the managed shell.
+  - Commands that replace or terminate the managed shell, such as exec, exit,
+    or logout, are unsupported.
+  - Host timeout stops polling only; it does not clear a busy managed pane.
 
 Output JSON fields:
   status               ok, busy, timeout, or error.
@@ -188,6 +194,21 @@ parse_exit_code_between() {
   dd if="$parse_file" bs=1 skip="$start_offset" count="$length" 2>/dev/null
 }
 
+request_has_end_sentinel() {
+  request_log_file=$1
+  request_id=$2
+  request_end_prefix="__TMUX_SKILL_RC_BEGIN__${request_id}__"
+  request_end_prefix_length=$(byte_length "$request_end_prefix")
+  request_end_prefix_offset=$(find_fixed_offset_after "$request_log_file" "$request_end_prefix" 0)
+
+  [ -n "$request_end_prefix_offset" ] || return 1
+
+  request_end_suffix="__TMUX_SKILL_RC_END__${request_id}__"
+  request_end_suffix_search_start=$((request_end_prefix_offset + request_end_prefix_length))
+  request_end_suffix_offset=$(find_fixed_offset_after "$request_log_file" "$request_end_suffix" "$request_end_suffix_search_start")
+  [ -n "$request_end_suffix_offset" ]
+}
+
 trap cleanup EXIT HUP INT TERM
 
 while [ "$#" -gt 0 ]; do
@@ -281,10 +302,21 @@ LOCK_HELD=1
 
 CURRENT_STATE=$(tmux show-options -p -v -q -t "$PANE_ID" "$DISPATCH_STATE_OPTION" 2>/dev/null)
 case $CURRENT_STATE in
-  busy|busy:*)
+  busy)
     STATUS='busy'
     MESSAGE='target pane is already running a managed command'
     emit_and_exit 4
+    ;;
+  busy:*)
+    PREVIOUS_REQUEST_ID=${CURRENT_STATE#busy:}
+
+    if request_has_end_sentinel "$LOG_FILE" "$PREVIOUS_REQUEST_ID"; then
+      tmux set-option -p -q -t "$PANE_ID" "$DISPATCH_STATE_OPTION" 'idle' >/dev/null 2>&1 || fail_json 5 error 'failed to recover a stale busy managed pane'
+    else
+      STATUS='busy'
+      MESSAGE='target pane is already running a managed command'
+      emit_and_exit 4
+    fi
     ;;
 esac
 
