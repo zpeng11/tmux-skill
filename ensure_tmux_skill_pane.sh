@@ -15,6 +15,7 @@
 
 PROGRAM_NAME=${0##*/}
 MARK_OPTION='@tmux_skill_mark'
+DISPATCH_STATE_OPTION='@tmux_skill_dispatch_state'
 MARK_PREFIX='TMUX_SKILL_PANE_'
 DEFAULT_PERCENT=30
 
@@ -58,10 +59,11 @@ Behavior:
 
 Output:
   On success, the script writes one JSON object to standard output:
-    {"mark":"TMUX_SKILL_PANE_N","log_file":"/path/to/log"}
+    {"mark":"TMUX_SKILL_PANE_N","pane_id":"%12","log_file":"/path/to/log"}
 
   Field details:
     mark      The managed pane mark that was reused or created.
+    pane_id   The tmux pane ID of the managed pane.
     log_file  The fresh temporary log file receiving pane output through
               tmux pipe-pane.
 
@@ -209,6 +211,7 @@ json_escape() {
 output_json() {
   printf '{'
   printf '"mark":"%s",' "$(json_escape "$MARK")"
+  printf '"pane_id":"%s",' "$(json_escape "$PANE_ID")"
   printf '"log_file":"%s"' "$(json_escape "$LOG_FILE")"
   printf '}\n'
 }
@@ -336,6 +339,7 @@ case $FOUND_MATCH_COUNT in
     fi
 
     tmux set-option -p -q -t "$PANE_ID" "$MARK_OPTION" "$MARK" >/dev/null 2>&1 || die 5 "failed to store mark $MARK on pane $PANE_ID"
+    tmux set-option -p -q -t "$PANE_ID" "$DISPATCH_STATE_OPTION" 'idle' >/dev/null 2>&1 || die 5 "failed to initialize dispatch state for pane $PANE_ID"
 
     INIT_CMD=" _mark_idle() { tmux set-option -p @pane_state 'idle' >/dev/null 2>&1; tmux wait-for -S ${MARK}_IDLE >/dev/null 2>&1; };"
     INIT_CMD="$INIT_CMD _mark_busy() { tmux set-option -p @pane_state 'busy' >/dev/null 2>&1; };"
