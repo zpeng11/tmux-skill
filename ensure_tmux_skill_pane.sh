@@ -14,12 +14,9 @@
 # 127 tmux is not installed or not in PATH
 
 PROGRAM_NAME=${0##*/}
-MARK_OPTION='@tmux_skill_mark'
-REQUEST_STATE_OPTION='@tmux_skill_request_state'
-SHELL_STATE_OPTION='@tmux_skill_shell_state'
-LOG_FILE_OPTION='@tmux_skill_log_file'
-MARK_PREFIX='TMUX_SKILL_PANE_'
-DEFAULT_PERCENT=30
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+# shellcheck source=./tmux_skill_pane_common.sh
+. "$SCRIPT_DIR/tmux_skill_pane_common.sh"
 
 show_help() {
   cat <<EOF
@@ -99,126 +96,6 @@ die() {
   shift
   printf '%s: %s\n' "$PROGRAM_NAME" "$*" >&2
   exit "$exit_code"
-}
-
-normalize_non_negative_integer() {
-  normalized=$(printf '%s' "$1" | sed 's/^0*//')
-
-  if [ -z "$normalized" ]; then
-    normalized=0
-  fi
-
-  printf '%s\n' "$normalized"
-}
-
-is_non_negative_integer() {
-  case $1 in
-    ''|*[!0-9]*)
-      return 1
-      ;;
-  esac
-
-  normalize_non_negative_integer "$1" >/dev/null
-}
-
-is_positive_integer() {
-  is_non_negative_integer "$1" || return 1
-
-  normalized=$(normalize_non_negative_integer "$1")
-  [ "$normalized" -gt 0 ] 2>/dev/null
-}
-
-mark_to_index() {
-  case $1 in
-    "${MARK_PREFIX}"*)
-      suffix=${1#"$MARK_PREFIX"}
-      ;;
-    *)
-      return 1
-      ;;
-  esac
-
-  is_non_negative_integer "$suffix" || return 1
-  normalize_non_negative_integer "$suffix"
-}
-
-list_current_session_panes() {
-  window_ids=$(tmux list-windows -t "$CURRENT_SESSION_ID" -F '#{window_id}') || return 1
-
-  for window_id in $window_ids; do
-    tmux list-panes -t "$window_id" -F '#{pane_id}' || return 1
-  done
-}
-
-pane_in_current_session() {
-  pane_session_id=$(tmux display-message -p -t "$1" '#{session_id}' 2>/dev/null) || return 1
-  [ "$pane_session_id" = "$CURRENT_SESSION_ID" ]
-}
-
-find_matching_pane() {
-  requested_index=$1
-  FOUND_PANE_ID=''
-  FOUND_MATCH_COUNT=0
-  pane_ids=$(list_current_session_panes) || return 1
-
-  for pane_id in $pane_ids; do
-    pane_mark=$(tmux show-options -p -v -q -t "$pane_id" "$MARK_OPTION")
-    pane_index=$(mark_to_index "$pane_mark" 2>/dev/null) || continue
-
-    if [ "$pane_index" = "$requested_index" ]; then
-      FOUND_MATCH_COUNT=$((FOUND_MATCH_COUNT + 1))
-      FOUND_PANE_ID=$pane_id
-    fi
-  done
-}
-
-allocate_index() {
-  used_indexes=' '
-  pane_ids=$(list_current_session_panes) || return 1
-
-  for pane_id in $pane_ids; do
-    pane_mark=$(tmux show-options -p -v -q -t "$pane_id" "$MARK_OPTION")
-    pane_index=$(mark_to_index "$pane_mark" 2>/dev/null) || continue
-
-    case $used_indexes in
-      *" $pane_index "*)
-        ;;
-      *)
-        used_indexes="${used_indexes}${pane_index} "
-        ;;
-    esac
-  done
-
-  next_index=0
-  while :; do
-    case $used_indexes in
-      *" $next_index "*)
-        next_index=$((next_index + 1))
-        ;;
-      *)
-        printf '%s\n' "$next_index"
-        return 0
-        ;;
-    esac
-  done
-}
-
-shell_single_quote() {
-  escaped=$(printf '%s' "$1" | sed "s/'/'\\\\''/g")
-  printf "'%s'" "$escaped"
-}
-
-json_escape() {
-  escaped=$(printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g')
-  printf '%s' "$escaped"
-}
-
-output_json() {
-  printf '{'
-  printf '"mark":"%s",' "$(json_escape "$MARK")"
-  printf '"pane_id":"%s",' "$(json_escape "$PANE_ID")"
-  printf '"log_file":"%s"' "$(json_escape "$LOG_FILE")"
-  printf '}\n'
 }
 
 INDEX=''
@@ -342,17 +219,7 @@ case $FOUND_MATCH_COUNT in
     tmux set-option -p -q -t "$PANE_ID" "$MARK_OPTION" "$MARK" >/dev/null 2>&1 || die 5 "failed to store mark $MARK on pane $PANE_ID"
     tmux set-option -p -q -t "$PANE_ID" "$REQUEST_STATE_OPTION" 'idle' >/dev/null 2>&1 || die 5 "failed to initialize request state for pane $PANE_ID"
 
-    INIT_CMD=" _mark_idle() { tmux set-option -p $SHELL_STATE_OPTION 'idle' >/dev/null 2>&1; tmux wait-for -S ${MARK}_IDLE >/dev/null 2>&1; };"
-    INIT_CMD="$INIT_CMD _mark_busy() { tmux set-option -p $SHELL_STATE_OPTION 'busy' >/dev/null 2>&1; };"
-    INIT_CMD="$INIT_CMD if [ -n \"\${ZSH_VERSION:-}\" ]; then"
-    INIT_CMD="$INIT_CMD   autoload -Uz add-zsh-hook 2>/dev/null;"
-    INIT_CMD="$INIT_CMD   add-zsh-hook precmd _mark_idle 2>/dev/null || precmd_functions+=(_mark_idle);"
-    INIT_CMD="$INIT_CMD   add-zsh-hook preexec _mark_busy 2>/dev/null || preexec_functions+=(_mark_busy);"
-    INIT_CMD="$INIT_CMD elif [ -n \"\${BASH_VERSION:-}\" ]; then"
-    INIT_CMD="$INIT_CMD   PROMPT_COMMAND=\"_mark_idle;\${PROMPT_COMMAND:-}\";"
-    INIT_CMD="$INIT_CMD   trap '_mark_busy' DEBUG;"
-    INIT_CMD="$INIT_CMD fi;"
-    INIT_CMD="$INIT_CMD _mark_idle; clear;"
+    INIT_CMD=$(build_init_cmd 1)
 
     tmux send-keys -l -t "$PANE_ID" "$INIT_CMD"
     tmux send-keys -t "$PANE_ID" C-m
@@ -377,10 +244,9 @@ else
       ;;
   esac
 
-  LOG_FILE=$(mktemp "${TMPDIR:-/tmp}/tmux-skill.${INDEX}.XXXXXX.log") || die 6 "failed to create a managed log file for $MARK"
-  QUOTED_LOG_FILE=$(shell_single_quote "$LOG_FILE")
+  LOG_FILE=$(create_log_file "$INDEX") || die 6 "failed to create a managed log file for $MARK"
 
-  tmux pipe-pane -O -t "$PANE_ID" "exec cat >> $QUOTED_LOG_FILE" >/dev/null 2>&1 || die 7 "failed to pipe pane $PANE_ID output to $LOG_FILE"
+  pipe_pane_to_log "$PANE_ID" "$LOG_FILE" || die 7 "failed to pipe pane $PANE_ID output to $LOG_FILE"
   tmux set-option -p -q -t "$PANE_ID" "$LOG_FILE_OPTION" "$LOG_FILE" >/dev/null 2>&1 || die 7 "failed to store managed log file $LOG_FILE on pane $PANE_ID"
 fi
 
