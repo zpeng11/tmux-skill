@@ -4,6 +4,7 @@ PROGRAM_NAME=${0##*/}
 MARK_OPTION='@tmux_skill_mark'
 DISPATCH_STATE_OPTION='@tmux_skill_dispatch_state'
 LOCK_PREFIX='tmux-skill-dispatch:'
+RECOVER_ONLY=0
 
 STATUS='error'
 MESSAGE=''
@@ -21,19 +22,26 @@ LOCK_HELD=0
 COMMAND=''
 INPUT_JSON=''
 INPUT_JSON_COMPACT=''
+RECOVERY_STATUS=''
+RECOVERY_MESSAGE=''
+RECOVERY_REQUEST_ID=''
 
 show_help() {
   cat <<EOF
 Usage:
   $PROGRAM_NAME --cmd COMMAND --timeout-seconds N < ensure.json
+  $PROGRAM_NAME --recover-only < ensure.json
 
 Read one ensure_tmux_skill_pane.sh JSON object from standard input, send one
-single-line shell command to the managed pane, and emit one JSON result.
+single-line shell command to the managed pane, or safely reconcile its managed
+dispatch state, and emit one JSON result.
 
 Options:
   --cmd COMMAND         Single shell command string to run in the target pane.
                         Newlines are rejected.
   --timeout-seconds N   Required positive integer timeout for result polling.
+  --recover-only        Reconcile the managed pane dispatch state without
+                        sending a command.
   -h, --help            Show this help text and exit.
 
 Input JSON fields:
@@ -46,24 +54,33 @@ Behavior:
   - Commands that replace or terminate the managed shell, such as exec, exit,
     or logout, are unsupported.
   - Host timeout stops polling only; it does not clear a busy managed pane.
+  - --recover-only returns idle, recovered, busy, or error.
 
 Output JSON fields:
-  status               ok, busy, timeout, or error.
-  mark                 Managed pane mark from stdin.
-  pane_id              Managed pane ID from stdin.
-  log_file             Managed pane log file from stdin.
-  request_id           Unique request ID for this invocation.
-  timeout_seconds      Requested timeout value.
-  exit_code            Command exit code when status=ok, otherwise null.
-  clean_start_offset   Byte offset immediately after the start sentinel.
-  clean_end_offset     Byte offset of the end sentinel prefix.
-  message              Optional failure detail.
+  Dispatch mode:
+    status             ok, busy, timeout, or error.
+    mark               Managed pane mark from stdin.
+    pane_id            Managed pane ID from stdin.
+    log_file           Managed pane log file from stdin.
+    request_id         Unique request ID for this invocation.
+    timeout_seconds    Requested timeout value.
+    exit_code          Command exit code when status=ok, otherwise null.
+    clean_start_offset Byte offset immediately after the start sentinel.
+    clean_end_offset   Byte offset of the end sentinel prefix.
+    message            Optional failure detail.
+  Recover mode:
+    status             idle, recovered, busy, or error.
+    mark               Managed pane mark from stdin.
+    pane_id            Managed pane ID from stdin.
+    log_file           Managed pane log file from stdin.
+    request_id         Recovered or active managed request ID when known.
+    message            Optional failure detail.
 
 Exit codes:
-  0    Success.
+  0    Success. The command completed, the pane is idle, or recovery succeeded.
   2    tmux is available, but the script is not running inside a tmux session.
   3    Invalid arguments, invalid stdin JSON, or pane/mark mismatch.
-  4    Target pane is already running a managed command.
+  4    Target pane is still busy or is not safely recoverable.
   5    tmux dispatch failed.
   6    Log parsing failed.
   7    Timed out waiting for the command result.
@@ -93,18 +110,29 @@ json_number_or_null() {
 }
 
 output_json() {
-  printf '{'
-  printf '"status":"%s",' "$(json_escape "$STATUS")"
-  printf '"mark":'; json_string_or_null "$MARK"; printf ','
-  printf '"pane_id":'; json_string_or_null "$PANE_ID"; printf ','
-  printf '"log_file":'; json_string_or_null "$LOG_FILE"; printf ','
-  printf '"request_id":'; json_string_or_null "$REQUEST_ID"; printf ','
-  printf '"timeout_seconds":'; json_number_or_null "$TIMEOUT_SECONDS"; printf ','
-  printf '"exit_code":'; json_number_or_null "$RESULT_EXIT_CODE"; printf ','
-  printf '"clean_start_offset":'; json_number_or_null "$CLEAN_START_OFFSET"; printf ','
-  printf '"clean_end_offset":'; json_number_or_null "$CLEAN_END_OFFSET"; printf ','
-  printf '"message":'; json_string_or_null "$MESSAGE"
-  printf '}\n'
+  if [ "$RECOVER_ONLY" -eq 1 ]; then
+    printf '{'
+    printf '"status":"%s",' "$(json_escape "$STATUS")"
+    printf '"mark":'; json_string_or_null "$MARK"; printf ','
+    printf '"pane_id":'; json_string_or_null "$PANE_ID"; printf ','
+    printf '"log_file":'; json_string_or_null "$LOG_FILE"; printf ','
+    printf '"request_id":'; json_string_or_null "$REQUEST_ID"; printf ','
+    printf '"message":'; json_string_or_null "$MESSAGE"
+    printf '}\n'
+  else
+    printf '{'
+    printf '"status":"%s",' "$(json_escape "$STATUS")"
+    printf '"mark":'; json_string_or_null "$MARK"; printf ','
+    printf '"pane_id":'; json_string_or_null "$PANE_ID"; printf ','
+    printf '"log_file":'; json_string_or_null "$LOG_FILE"; printf ','
+    printf '"request_id":'; json_string_or_null "$REQUEST_ID"; printf ','
+    printf '"timeout_seconds":'; json_number_or_null "$TIMEOUT_SECONDS"; printf ','
+    printf '"exit_code":'; json_number_or_null "$RESULT_EXIT_CODE"; printf ','
+    printf '"clean_start_offset":'; json_number_or_null "$CLEAN_START_OFFSET"; printf ','
+    printf '"clean_end_offset":'; json_number_or_null "$CLEAN_END_OFFSET"; printf ','
+    printf '"message":'; json_string_or_null "$MESSAGE"
+    printf '}\n'
+  fi
 }
 
 cleanup() {
@@ -209,6 +237,41 @@ request_has_end_sentinel() {
   [ -n "$request_end_suffix_offset" ]
 }
 
+reconcile_dispatch_state() {
+  CURRENT_STATE=$(tmux show-options -p -v -q -t "$PANE_ID" "$DISPATCH_STATE_OPTION" 2>/dev/null)
+  case $CURRENT_STATE in
+    ''|idle)
+      RECOVERY_STATUS='idle'
+      RECOVERY_MESSAGE=''
+      RECOVERY_REQUEST_ID=''
+      return 0
+      ;;
+    busy)
+      RECOVERY_STATUS='busy'
+      RECOVERY_MESSAGE='target pane uses a legacy busy state without a recoverable request id'
+      RECOVERY_REQUEST_ID=''
+      return 1
+      ;;
+    busy:*)
+      RECOVERY_REQUEST_ID=${CURRENT_STATE#busy:}
+
+      if request_has_end_sentinel "$LOG_FILE" "$RECOVERY_REQUEST_ID"; then
+        tmux set-option -p -q -t "$PANE_ID" "$DISPATCH_STATE_OPTION" 'idle' >/dev/null 2>&1 || fail_json 5 error 'failed to recover a stale busy managed pane'
+        RECOVERY_STATUS='recovered'
+        RECOVERY_MESSAGE=''
+        return 0
+      fi
+
+      RECOVERY_STATUS='busy'
+      RECOVERY_MESSAGE='request still appears active or is not safely recoverable'
+      return 1
+      ;;
+    *)
+      fail_json 5 error 'unexpected managed pane dispatch state'
+      ;;
+  esac
+}
+
 trap cleanup EXIT HUP INT TERM
 
 while [ "$#" -gt 0 ]; do
@@ -231,6 +294,10 @@ while [ "$#" -gt 0 ]; do
       TIMEOUT_SECONDS=${1#*=}
       shift
       ;;
+    --recover-only)
+      RECOVER_ONLY=1
+      shift
+      ;;
     -h|--help)
       show_help
       exit 0
@@ -249,17 +316,23 @@ while [ "$#" -gt 0 ]; do
 done
 
 [ "$#" -eq 0 ] || fail_json 3 error "unexpected argument: $1"
-[ -n "$COMMAND" ] || fail_json 3 error 'missing required --cmd'
-[ -n "$TIMEOUT_SECONDS" ] || fail_json 3 error 'missing required --timeout-seconds'
-is_positive_integer "$TIMEOUT_SECONDS" || fail_json 3 error 'timeout must be a positive integer'
-TIMEOUT_SECONDS=$(normalize_non_negative_integer "$TIMEOUT_SECONDS")
+if [ "$RECOVER_ONLY" -eq 1 ]; then
+  [ -z "$COMMAND" ] || fail_json 3 error '--cmd is not supported with --recover-only'
+  [ -z "$TIMEOUT_SECONDS" ] || fail_json 3 error '--timeout-seconds is not supported with --recover-only'
+else
+  [ -n "$COMMAND" ] || fail_json 3 error 'missing required --cmd'
+  [ -n "$TIMEOUT_SECONDS" ] || fail_json 3 error 'missing required --timeout-seconds'
+  is_positive_integer "$TIMEOUT_SECONDS" || fail_json 3 error 'timeout must be a positive integer'
+  TIMEOUT_SECONDS=$(normalize_non_negative_integer "$TIMEOUT_SECONDS")
 
-case $COMMAND in
-  *'
-'*|*''*)
-    fail_json 3 error 'command must be a single shell string without newlines'
-    ;;
-esac
+  case $COMMAND in
+    *'
+'*|*'
+'*)
+      fail_json 3 error 'command must be a single shell string without newlines'
+      ;;
+  esac
+fi
 
 if ! command -v tmux >/dev/null 2>&1; then
   printf '%s: %s\n' "$PROGRAM_NAME" 'tmux not found in PATH' >&2
@@ -294,31 +367,31 @@ CURRENT_PANE_SESSION_ID=$(tmux display-message -p -t "$PANE_ID" '#{session_id}' 
 CURRENT_MARK=$(tmux show-options -p -v -q -t "$PANE_ID" "$MARK_OPTION" 2>/dev/null)
 [ "$CURRENT_MARK" = "$MARK" ] || fail_json 3 error 'pane_id mark does not match stdin JSON'
 
-REQUEST_ID="$(date +%s)-$$"
 LOCK_CHANNEL="${LOCK_PREFIX}${PANE_ID}"
 
 tmux wait-for -L "$LOCK_CHANNEL" >/dev/null 2>&1 || fail_json 5 error 'failed to acquire dispatch lock'
 LOCK_HELD=1
 
-CURRENT_STATE=$(tmux show-options -p -v -q -t "$PANE_ID" "$DISPATCH_STATE_OPTION" 2>/dev/null)
-case $CURRENT_STATE in
-  busy)
+if ! reconcile_dispatch_state; then
+  if [ "$RECOVER_ONLY" -eq 1 ]; then
+    REQUEST_ID=$RECOVERY_REQUEST_ID
+    STATUS=$RECOVERY_STATUS
+    MESSAGE=$RECOVERY_MESSAGE
+  else
     STATUS='busy'
     MESSAGE='target pane is already running a managed command'
-    emit_and_exit 4
-    ;;
-  busy:*)
-    PREVIOUS_REQUEST_ID=${CURRENT_STATE#busy:}
+  fi
+  emit_and_exit 4
+fi
 
-    if request_has_end_sentinel "$LOG_FILE" "$PREVIOUS_REQUEST_ID"; then
-      tmux set-option -p -q -t "$PANE_ID" "$DISPATCH_STATE_OPTION" 'idle' >/dev/null 2>&1 || fail_json 5 error 'failed to recover a stale busy managed pane'
-    else
-      STATUS='busy'
-      MESSAGE='target pane is already running a managed command'
-      emit_and_exit 4
-    fi
-    ;;
-esac
+if [ "$RECOVER_ONLY" -eq 1 ]; then
+  REQUEST_ID=$RECOVERY_REQUEST_ID
+  STATUS=$RECOVERY_STATUS
+  MESSAGE=$RECOVERY_MESSAGE
+  emit_and_exit 0
+fi
+
+REQUEST_ID="$(date +%s)-$$"
 
 tmux set-option -p -q -t "$PANE_ID" "$DISPATCH_STATE_OPTION" "busy:$REQUEST_ID" >/dev/null 2>&1 || fail_json 5 error 'failed to mark target pane as busy'
 
