@@ -2,8 +2,8 @@
 
 PROGRAM_NAME=${0##*/}
 MARK_OPTION='@tmux_skill_mark'
-DISPATCH_STATE_OPTION='@tmux_skill_dispatch_state'
-LOCK_PREFIX='tmux-skill-dispatch:'
+REQUEST_STATE_OPTION='@tmux_skill_request_state'
+LOCK_PREFIX='tmux-skill-request:'
 RECOVER_ONLY=0
 
 STATUS='error'
@@ -34,13 +34,13 @@ Usage:
 
 Read one ensure_tmux_skill_pane.sh JSON object from standard input, send one
 single-line shell command to the managed pane, or safely reconcile its managed
-dispatch state, and emit one JSON result.
+request state, and emit one JSON result.
 
 Options:
   --cmd COMMAND         Single shell command string to run in the target pane.
                         Newlines are rejected.
   --timeout-seconds N   Required positive integer timeout for result polling.
-  --recover-only        Reconcile the managed pane dispatch state without
+  --recover-only        Reconcile the managed request state without
                         sending a command.
   -h, --help            Show this help text and exit.
 
@@ -53,11 +53,11 @@ Behavior:
   - Commands must return control to the managed shell.
   - Commands that replace or terminate the managed shell, such as exec, exit,
     or logout, are unsupported.
-  - Host timeout stops polling only; it does not clear a busy managed pane.
+  - Host timeout stops polling only; it does not clear a busy managed request.
   - --recover-only returns idle, recovered, busy, or error.
 
 Output JSON fields:
-  Dispatch mode:
+  Request mode:
     status             ok, busy, timeout, or error.
     mark               Managed pane mark from stdin.
     pane_id            Managed pane ID from stdin.
@@ -81,7 +81,7 @@ Exit codes:
   2    tmux is available, but the script is not running inside a tmux session.
   3    Invalid arguments, invalid stdin JSON, or pane/mark mismatch.
   4    Target pane is still busy or is not safely recoverable.
-  5    tmux dispatch failed.
+  5    tmux request handling failed.
   6    Log parsing failed.
   7    Timed out waiting for the command result.
   127  tmux is not installed or is not available in PATH.
@@ -237,8 +237,8 @@ request_has_end_sentinel() {
   [ -n "$request_end_suffix_offset" ]
 }
 
-reconcile_dispatch_state() {
-  CURRENT_STATE=$(tmux show-options -p -v -q -t "$PANE_ID" "$DISPATCH_STATE_OPTION" 2>/dev/null)
+reconcile_request_state() {
+  CURRENT_STATE=$(tmux show-options -p -v -q -t "$PANE_ID" "$REQUEST_STATE_OPTION" 2>/dev/null)
   case $CURRENT_STATE in
     ''|idle)
       RECOVERY_STATUS='idle'
@@ -256,7 +256,7 @@ reconcile_dispatch_state() {
       RECOVERY_REQUEST_ID=${CURRENT_STATE#busy:}
 
       if request_has_end_sentinel "$LOG_FILE" "$RECOVERY_REQUEST_ID"; then
-        tmux set-option -p -q -t "$PANE_ID" "$DISPATCH_STATE_OPTION" 'idle' >/dev/null 2>&1 || fail_json 5 error 'failed to recover a stale busy managed pane'
+        tmux set-option -p -q -t "$PANE_ID" "$REQUEST_STATE_OPTION" 'idle' >/dev/null 2>&1 || fail_json 5 error 'failed to recover a stale busy managed request'
         RECOVERY_STATUS='recovered'
         RECOVERY_MESSAGE=''
         return 0
@@ -267,7 +267,7 @@ reconcile_dispatch_state() {
       return 1
       ;;
     *)
-      fail_json 5 error 'unexpected managed pane dispatch state'
+      fail_json 5 error 'unexpected managed request state'
       ;;
   esac
 }
@@ -369,10 +369,10 @@ CURRENT_MARK=$(tmux show-options -p -v -q -t "$PANE_ID" "$MARK_OPTION" 2>/dev/nu
 
 LOCK_CHANNEL="${LOCK_PREFIX}${PANE_ID}"
 
-tmux wait-for -L "$LOCK_CHANNEL" >/dev/null 2>&1 || fail_json 5 error 'failed to acquire dispatch lock'
+tmux wait-for -L "$LOCK_CHANNEL" >/dev/null 2>&1 || fail_json 5 error 'failed to acquire request lock'
 LOCK_HELD=1
 
-if ! reconcile_dispatch_state; then
+if ! reconcile_request_state; then
   if [ "$RECOVER_ONLY" -eq 1 ]; then
     REQUEST_ID=$RECOVERY_REQUEST_ID
     STATUS=$RECOVERY_STATUS
@@ -393,7 +393,7 @@ fi
 
 REQUEST_ID="$(date +%s)-$$"
 
-tmux set-option -p -q -t "$PANE_ID" "$DISPATCH_STATE_OPTION" "busy:$REQUEST_ID" >/dev/null 2>&1 || fail_json 5 error 'failed to mark target pane as busy'
+tmux set-option -p -q -t "$PANE_ID" "$REQUEST_STATE_OPTION" "busy:$REQUEST_ID" >/dev/null 2>&1 || fail_json 5 error 'failed to mark target pane request state as busy'
 
 LOG_START_OFFSET=$(byte_count "$LOG_FILE")
 START_SENTINEL="__TMUX_SKILL_BEGIN__${REQUEST_ID}__"
@@ -401,17 +401,17 @@ END_SENTINEL_PREFIX="__TMUX_SKILL_RC_BEGIN__${REQUEST_ID}__"
 END_SENTINEL_SUFFIX="__TMUX_SKILL_RC_END__${REQUEST_ID}__"
 QUOTED_REQUEST_ID=$(shell_single_quote "$REQUEST_ID")
 QUOTED_COMMAND=$(shell_single_quote "$COMMAND")
-QUOTED_DISPATCH_STATE_OPTION=$(shell_single_quote "$DISPATCH_STATE_OPTION")
+QUOTED_REQUEST_STATE_OPTION=$(shell_single_quote "$REQUEST_STATE_OPTION")
 QUOTED_TARGET_PANE=$(shell_single_quote "$PANE_ID")
-WRAPPED_COMMAND="__tmux_skill_req=$QUOTED_REQUEST_ID; __tmux_skill_target=$QUOTED_TARGET_PANE; __tmux_skill_dispatch_option=$QUOTED_DISPATCH_STATE_OPTION; __tmux_skill_cmd=$QUOTED_COMMAND; printf '%s%s%s' '__TMUX_SKILL_BEGIN__' \"\$__tmux_skill_req\" '__'; eval \"\$__tmux_skill_cmd\"; __tmux_skill_rc=\$?; printf '%s%s%s%s%s' '__TMUX_SKILL_RC_BEGIN__' \"\$__tmux_skill_req\" '__' \"\$__tmux_skill_rc\" '__TMUX_SKILL_RC_END__'; printf '%s%s' \"\$__tmux_skill_req\" '__'; tmux set-option -p -t \"\$__tmux_skill_target\" \"\$__tmux_skill_dispatch_option\" idle >/dev/null 2>&1"
+WRAPPED_COMMAND="__tmux_skill_req=$QUOTED_REQUEST_ID; __tmux_skill_target=$QUOTED_TARGET_PANE; __tmux_skill_request_option=$QUOTED_REQUEST_STATE_OPTION; __tmux_skill_cmd=$QUOTED_COMMAND; printf '%s%s%s' '__TMUX_SKILL_BEGIN__' \"\$__tmux_skill_req\" '__'; eval \"\$__tmux_skill_cmd\"; __tmux_skill_rc=\$?; printf '%s%s%s%s%s' '__TMUX_SKILL_RC_BEGIN__' \"\$__tmux_skill_req\" '__' \"\$__tmux_skill_rc\" '__TMUX_SKILL_RC_END__'; printf '%s%s' \"\$__tmux_skill_req\" '__'; tmux set-option -p -t \"\$__tmux_skill_target\" \"\$__tmux_skill_request_option\" idle >/dev/null 2>&1"
 
 if ! tmux send-keys -l -t "$PANE_ID" "$WRAPPED_COMMAND" >/dev/null 2>&1; then
-  tmux set-option -p -q -t "$PANE_ID" "$DISPATCH_STATE_OPTION" 'idle' >/dev/null 2>&1 || true
+  tmux set-option -p -q -t "$PANE_ID" "$REQUEST_STATE_OPTION" 'idle' >/dev/null 2>&1 || true
   fail_json 5 error 'failed to send command to target pane'
 fi
 
 if ! tmux send-keys -t "$PANE_ID" C-m >/dev/null 2>&1; then
-  tmux set-option -p -q -t "$PANE_ID" "$DISPATCH_STATE_OPTION" 'idle' >/dev/null 2>&1 || true
+  tmux set-option -p -q -t "$PANE_ID" "$REQUEST_STATE_OPTION" 'idle' >/dev/null 2>&1 || true
   fail_json 5 error 'failed to execute command in target pane'
 fi
 

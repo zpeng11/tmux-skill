@@ -28,7 +28,7 @@ Usage:
   $PROGRAM_NAME < ensure.json
 
 Read one ensure_tmux_skill_pane.sh JSON object from standard input and safely
-reconcile the managed pane dispatch state.
+reconcile the managed request state.
 
 Input JSON fields:
   mark      Managed pane mark.
@@ -44,7 +44,7 @@ Output JSON fields:
   message     Optional failure detail.
 
 Behavior:
-  - idle or empty dispatch state returns status=idle.
+  - idle or empty request state returns status=idle.
   - busy:REQUEST_ID is reconciled only if that request's end sentinel exists in
     the managed log file.
   - Legacy busy without a request ID is not safely recoverable.

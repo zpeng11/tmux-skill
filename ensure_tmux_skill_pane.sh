@@ -15,7 +15,8 @@
 
 PROGRAM_NAME=${0##*/}
 MARK_OPTION='@tmux_skill_mark'
-DISPATCH_STATE_OPTION='@tmux_skill_dispatch_state'
+REQUEST_STATE_OPTION='@tmux_skill_request_state'
+SHELL_STATE_OPTION='@tmux_skill_shell_state'
 LOG_FILE_OPTION='@tmux_skill_log_file'
 MARK_PREFIX='TMUX_SKILL_PANE_'
 DEFAULT_PERCENT=30
@@ -339,10 +340,10 @@ case $FOUND_MATCH_COUNT in
     fi
 
     tmux set-option -p -q -t "$PANE_ID" "$MARK_OPTION" "$MARK" >/dev/null 2>&1 || die 5 "failed to store mark $MARK on pane $PANE_ID"
-    tmux set-option -p -q -t "$PANE_ID" "$DISPATCH_STATE_OPTION" 'idle' >/dev/null 2>&1 || die 5 "failed to initialize dispatch state for pane $PANE_ID"
+    tmux set-option -p -q -t "$PANE_ID" "$REQUEST_STATE_OPTION" 'idle' >/dev/null 2>&1 || die 5 "failed to initialize request state for pane $PANE_ID"
 
-    INIT_CMD=" _mark_idle() { tmux set-option -p @pane_state 'idle' >/dev/null 2>&1; tmux wait-for -S ${MARK}_IDLE >/dev/null 2>&1; };"
-    INIT_CMD="$INIT_CMD _mark_busy() { tmux set-option -p @pane_state 'busy' >/dev/null 2>&1; };"
+    INIT_CMD=" _mark_idle() { tmux set-option -p $SHELL_STATE_OPTION 'idle' >/dev/null 2>&1; tmux wait-for -S ${MARK}_IDLE >/dev/null 2>&1; };"
+    INIT_CMD="$INIT_CMD _mark_busy() { tmux set-option -p $SHELL_STATE_OPTION 'busy' >/dev/null 2>&1; };"
     INIT_CMD="$INIT_CMD if [ -n \"\${ZSH_VERSION:-}\" ]; then"
     INIT_CMD="$INIT_CMD   autoload -Uz add-zsh-hook 2>/dev/null;"
     INIT_CMD="$INIT_CMD   add-zsh-hook precmd _mark_idle 2>/dev/null || precmd_functions+=(_mark_idle);"
@@ -364,13 +365,13 @@ case $FOUND_MATCH_COUNT in
     ;;
 esac
 
-DISPATCH_STATE=$(tmux show-options -p -v -q -t "$PANE_ID" "$DISPATCH_STATE_OPTION" 2>/dev/null)
+REQUEST_STATE=$(tmux show-options -p -v -q -t "$PANE_ID" "$REQUEST_STATE_OPTION" 2>/dev/null)
 STORED_LOG_FILE=$(tmux show-options -p -v -q -t "$PANE_ID" "$LOG_FILE_OPTION" 2>/dev/null)
 
 if [ -n "$STORED_LOG_FILE" ] && [ -f "$STORED_LOG_FILE" ] && [ -r "$STORED_LOG_FILE" ]; then
   LOG_FILE=$STORED_LOG_FILE
 else
-  case $DISPATCH_STATE in
+  case $REQUEST_STATE in
     busy|busy:*)
       die 7 "managed pane $PANE_ID is busy but its managed log file is unavailable"
       ;;
