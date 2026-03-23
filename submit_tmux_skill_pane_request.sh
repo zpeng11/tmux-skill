@@ -39,7 +39,8 @@ Exit codes:
   0    Request submitted.
   2    tmux is available, but the script is not running inside a tmux session.
   3    Invalid arguments, invalid stdin JSON, or pane/mark mismatch.
-  4    The target pane is already running a managed request.
+  4    The target pane is already running a managed request, or its shell is
+       busy with an unmanaged command.
   5    tmux request submission failed.
   6    Log validation failed.
   127  tmux is not installed or is not available in PATH.
@@ -48,7 +49,7 @@ EOF
 
 output_json() {
   printf '{'
-  printf '"status":"%s",' "$(tmux_skill_json_escape "$STATUS")"
+  printf '"status":"%s",' "$(json_escape "$STATUS")"
   printf '"mark":'; tmux_skill_json_string_or_null "$TMUX_SKILL_MARK"; printf ','
   printf '"pane_id":'; tmux_skill_json_string_or_null "$TMUX_SKILL_PANE_ID"; printf ','
   printf '"log_file":'; tmux_skill_json_string_or_null "$TMUX_SKILL_LOG_FILE"; printf ','
@@ -136,6 +137,17 @@ case $reconcile_rc in
     fail_json "$TMUX_SKILL_ERROR_CODE" error "$TMUX_SKILL_ERROR_MESSAGE"
     ;;
 esac
+
+CURRENT_SHELL_STATE=$(tmux_skill_current_shell_state)
+if [ "$CURRENT_SHELL_STATE" != 'idle' ]; then
+  STATUS='busy'
+  if [ -z "$CURRENT_SHELL_STATE" ]; then
+    MESSAGE='target pane shell state is not yet initialized'
+  else
+    MESSAGE='target pane shell is busy with an unmanaged command'
+  fi
+  emit_and_exit 4
+fi
 
 REQUEST_ID=$(printf '%s' "$(tmux_skill_generate_request_id)")
 tmux_skill_send_managed_command "$REQUEST_ID" "$COMMAND" || fail_json "$TMUX_SKILL_ERROR_CODE" error "$TMUX_SKILL_ERROR_MESSAGE"

@@ -44,11 +44,13 @@ Behavior:
   - Commands that replace or terminate the managed shell, such as exec, exit,
     or logout, are unsupported.
   - Host timeout stops polling only; it does not clear a busy managed request.
-  - --recover-only returns idle, recovered, busy, or error.
+  - If the pane returns to its shell prompt without emitting a completion
+    sentinel, request mode returns interrupted.
+  - --recover-only returns idle, recovered, interrupted, busy, or error.
 
 Output JSON fields:
   Request mode:
-    status             ok, busy, timeout, or error.
+    status             ok, busy, interrupted, timeout, or error.
     mark               Managed pane mark from stdin.
     pane_id            Managed pane ID from stdin.
     log_file           Managed pane log file from stdin.
@@ -59,7 +61,7 @@ Output JSON fields:
     clean_end_offset   Byte offset of the end sentinel prefix.
     message            Optional failure detail.
   Recover mode:
-    status             idle, recovered, busy, or error.
+    status             idle, recovered, interrupted, busy, or error.
     mark               Managed pane mark from stdin.
     pane_id            Managed pane ID from stdin.
     log_file           Managed pane log file from stdin.
@@ -68,6 +70,8 @@ Output JSON fields:
 
 Exit codes:
   0    Success. The command completed, the pane is idle, or recovery succeeded.
+  130  The managed request returned to the shell without a completion
+       sentinel.
   2    tmux is available, but the script is not running inside a tmux session.
   3    Invalid arguments, invalid stdin JSON, or pane/mark mismatch.
   4    Target pane is still busy or is not safely recoverable.
@@ -81,7 +85,7 @@ EOF
 output_json() {
   if [ "$RECOVER_ONLY" -eq 1 ]; then
     printf '{'
-    printf '"status":"%s",' "$(tmux_skill_json_escape "$STATUS")"
+    printf '"status":"%s",' "$(json_escape "$STATUS")"
     printf '"mark":'; tmux_skill_json_string_or_null "$TMUX_SKILL_MARK"; printf ','
     printf '"pane_id":'; tmux_skill_json_string_or_null "$TMUX_SKILL_PANE_ID"; printf ','
     printf '"log_file":'; tmux_skill_json_string_or_null "$TMUX_SKILL_LOG_FILE"; printf ','
@@ -90,7 +94,7 @@ output_json() {
     printf '}\n'
   else
     printf '{'
-    printf '"status":"%s",' "$(tmux_skill_json_escape "$STATUS")"
+    printf '"status":"%s",' "$(json_escape "$STATUS")"
     printf '"mark":'; tmux_skill_json_string_or_null "$TMUX_SKILL_MARK"; printf ','
     printf '"pane_id":'; tmux_skill_json_string_or_null "$TMUX_SKILL_PANE_ID"; printf ','
     printf '"log_file":'; tmux_skill_json_string_or_null "$TMUX_SKILL_LOG_FILE"; printf ','
@@ -258,8 +262,8 @@ fi
 
 [ -n "$COMMAND" ] || fail_json 3 error 'missing required --cmd'
 [ -n "$TIMEOUT_SECONDS" ] || fail_json 3 error 'missing required --timeout-seconds'
-tmux_skill_is_positive_integer "$TIMEOUT_SECONDS" || fail_json 3 error 'timeout must be a positive integer'
-TIMEOUT_SECONDS=$(tmux_skill_normalize_non_negative_integer "$TIMEOUT_SECONDS")
+is_positive_integer "$TIMEOUT_SECONDS" || fail_json 3 error 'timeout must be a positive integer'
+TIMEOUT_SECONDS=$(normalize_non_negative_integer "$TIMEOUT_SECONDS")
 
 case $COMMAND in
   *'

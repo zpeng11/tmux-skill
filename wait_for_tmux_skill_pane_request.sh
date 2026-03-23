@@ -30,7 +30,7 @@ Options:
   -h, --help             Show this help text and exit.
 
 Output JSON fields:
-  status              ok, pending, timeout, or error.
+  status              ok, pending, interrupted, timeout, or error.
   mark                Managed pane mark from stdin.
   pane_id             Managed pane ID from stdin.
   log_file            Managed pane log file from stdin.
@@ -44,6 +44,8 @@ Output JSON fields:
 
 Exit codes:
   0    The managed request completed.
+  130  The managed request returned to the shell without a completion
+       sentinel.
   2    tmux is available, but the script is not running inside a tmux session.
   3    Invalid arguments, invalid stdin JSON, or pane/mark mismatch.
   4    The managed request is still pending in query-only mode.
@@ -56,7 +58,7 @@ EOF
 
 output_json() {
   printf '{'
-  printf '"status":"%s",' "$(tmux_skill_json_escape "$STATUS")"
+  printf '"status":"%s",' "$(json_escape "$STATUS")"
   printf '"mark":'; tmux_skill_json_string_or_null "$TMUX_SKILL_MARK"; printf ','
   printf '"pane_id":'; tmux_skill_json_string_or_null "$TMUX_SKILL_PANE_ID"; printf ','
   printf '"log_file":'; tmux_skill_json_string_or_null "$TMUX_SKILL_LOG_FILE"; printf ','
@@ -70,6 +72,7 @@ output_json() {
 
 emit_and_exit() {
   exit_code=$1
+  tmux_skill_cleanup
   output_json
   exit "$exit_code"
 }
@@ -80,6 +83,8 @@ fail_json() {
   MESSAGE=$3
   emit_and_exit "$exit_code"
 }
+
+trap tmux_skill_cleanup EXIT HUP INT TERM
 
 while [ "$#" -gt 0 ]; do
   case $1 in
@@ -138,12 +143,12 @@ if [ "$QUERY_ONLY" -eq 1 ]; then
   [ -z "$TIMEOUT_SECONDS" ] || fail_json 3 error '--timeout-seconds is not supported with --query-only'
 else
   [ -n "$TIMEOUT_SECONDS" ] || fail_json 3 error 'missing required --timeout-seconds'
-  tmux_skill_is_positive_integer "$TIMEOUT_SECONDS" || fail_json 3 error 'timeout must be a positive integer'
-  TIMEOUT_SECONDS=$(tmux_skill_normalize_non_negative_integer "$TIMEOUT_SECONDS")
+  is_positive_integer "$TIMEOUT_SECONDS" || fail_json 3 error 'timeout must be a positive integer'
+  TIMEOUT_SECONDS=$(normalize_non_negative_integer "$TIMEOUT_SECONDS")
 fi
 
-tmux_skill_is_non_negative_integer "$SEARCH_START_OFFSET" || fail_json 3 error 'search-start-offset must be a non-negative integer'
-SEARCH_START_OFFSET=$(tmux_skill_normalize_non_negative_integer "$SEARCH_START_OFFSET")
+is_non_negative_integer "$SEARCH_START_OFFSET" || fail_json 3 error 'search-start-offset must be a non-negative integer'
+SEARCH_START_OFFSET=$(normalize_non_negative_integer "$SEARCH_START_OFFSET")
 
 tmux_skill_require_tmux_session || fail_json "$TMUX_SKILL_ERROR_CODE" error "$TMUX_SKILL_ERROR_MESSAGE"
 tmux_skill_load_ensure_json_from_stdin || fail_json "$TMUX_SKILL_ERROR_CODE" error "$TMUX_SKILL_ERROR_MESSAGE"
@@ -171,23 +176,65 @@ while :; do
 
   CURRENT_STATE=$(tmux_skill_current_request_state)
 
-  if [ "$CURRENT_STATE" = "busy:$REQUEST_ID" ]; then
-    if [ "$QUERY_ONLY" -eq 1 ]; then
-      STATUS='pending'
-      MESSAGE='request still appears active'
-      emit_and_exit 4
-    fi
+  case $CURRENT_STATE in
+    "interrupted:$REQUEST_ID")
+      STATUS='interrupted'
+      MESSAGE='managed request returned to the shell without a completion sentinel'
+      emit_and_exit 130
+      ;;
+    "busy:$REQUEST_ID")
+      tmux_skill_lock_request || fail_json "$TMUX_SKILL_ERROR_CODE" error "$TMUX_SKILL_ERROR_MESSAGE"
 
-    now=$(date +%s)
-    if [ "$now" -ge "$DEADLINE" ]; then
-      STATUS='timeout'
-      MESSAGE='timed out waiting for the command result'
-      emit_and_exit 7
-    fi
+      tmux_skill_find_request_result "$REQUEST_ID" "$SEARCH_START_OFFSET"
+      find_rc=$?
 
-    sleep 1
-    continue
-  fi
+      case $find_rc in
+        0)
+          STATUS='ok'
+          MESSAGE=''
+          emit_and_exit 0
+          ;;
+        1)
+          ;;
+        *)
+          fail_json "$TMUX_SKILL_ERROR_CODE" error "$TMUX_SKILL_ERROR_MESSAGE"
+          ;;
+      esac
+
+      tmux_skill_mark_request_interrupted_if_stale "$REQUEST_ID"
+      stale_interrupt_rc=$?
+
+      case $stale_interrupt_rc in
+        0)
+          STATUS='interrupted'
+          MESSAGE='managed request returned to the shell without a completion sentinel'
+          emit_and_exit 130
+          ;;
+        1)
+          tmux_skill_cleanup
+          ;;
+        *)
+          fail_json "$TMUX_SKILL_ERROR_CODE" error "$TMUX_SKILL_ERROR_MESSAGE"
+          ;;
+      esac
+
+      if [ "$QUERY_ONLY" -eq 1 ]; then
+        STATUS='pending'
+        MESSAGE='request still appears active'
+        emit_and_exit 4
+      fi
+
+      now=$(date +%s)
+      if [ "$now" -ge "$DEADLINE" ]; then
+        STATUS='timeout'
+        MESSAGE='timed out waiting for the command result'
+        emit_and_exit 7
+      fi
+
+      sleep 1
+      continue
+      ;;
+  esac
 
   STATUS='error'
   MESSAGE='request is not active and no matching completion was found in the log'

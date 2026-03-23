@@ -4,10 +4,7 @@ PROGRAM_NAME=${0##*/}
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 RUN_SCRIPT="$SCRIPT_DIR/run_in_tmux_skill_pane.sh"
 
-json_escape() {
-  escaped=$(printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g')
-  printf '%s' "$escaped"
-}
+. "$SCRIPT_DIR/tmux_skill_pane_common.sh"
 
 fail_json() {
   message=$1
@@ -36,7 +33,7 @@ Input JSON fields:
   log_file  Managed pane log file currently receiving pane output.
 
 Output JSON fields:
-  status      idle, recovered, busy, or error.
+  status      idle, recovered, interrupted, busy, or error.
   mark        Managed pane mark from stdin.
   pane_id     Managed pane ID from stdin.
   log_file    Managed pane log file from stdin.
@@ -47,10 +44,12 @@ Behavior:
   - idle or empty request state returns status=idle.
   - busy:REQUEST_ID is reconciled only if that request's end sentinel exists in
     the managed log file.
+  - busy:REQUEST_ID with no end sentinel is reconciled as interrupted once the
+    pane has already returned to its shell prompt.
   - Legacy busy without a request ID is not safely recoverable.
 
 Exit codes:
-  0    Success. The pane is idle or was safely recovered.
+  0    Success. The pane is idle or was safely reconciled.
   2    tmux is available, but the script is not running inside a tmux session.
   3    Invalid stdin JSON, or pane/mark mismatch.
   4    The pane still appears busy or is not safely recoverable.

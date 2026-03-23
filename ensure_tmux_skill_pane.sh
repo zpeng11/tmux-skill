@@ -35,26 +35,31 @@ Options:
                         N must be a non-negative integer. If omitted, allocate
                         the smallest unused non-negative index
                         in the current session.
-  -w, --new-window      Create the pane in a new window instead of splitting an
-                        existing pane.
-  -H, --horizontal      Create a horizontal split when a new split pane is
-                        needed.
-  -V, --vertical        Create a vertical split when a new split pane is
+  -w, --new-window      Create the pane in a new window when a new pane is
                         needed. This is the default.
-  -p, --percent N       Split size percentage for new split panes.
+  -s, --split-window    Create the pane by splitting an existing pane when a
+                        new pane is needed.
+  -H, --horizontal      Create a horizontal split. Only valid with
+                        --split-window.
+  -V, --vertical        Create a vertical split. Only valid with
+                        --split-window. This is the default split orientation.
+  -p, --percent N       Split size percentage for new split panes. Only valid
+                        with --split-window.
                         Valid range: 1 to 100. Default: $DEFAULT_PERCENT.
-  -t, --target-pane ID  Split relative to pane ID ID when creating a new split
-                        pane. The target pane must belong to the current tmux
-                        session. Default: the current pane.
+  -t, --target-pane ID  Split relative to pane ID ID. Only valid with
+                        --split-window. The target pane must belong to the
+                        current tmux session. Default: the current pane.
   -h, --help            Show this help text and exit.
 
 Behavior:
   - The script only searches for managed panes in the current tmux session.
   - If exactly one pane already uses the requested mark, that pane is reused.
-  - If no pane uses the requested mark, a new pane is created.
+  - If no pane uses the requested mark, a detached new window is created by
+    default.
   - If two or more panes use the requested mark, the script fails with exit 4.
+  - Use --split-window to create the pane by splitting an existing pane.
   - Split options are ignored when reusing an existing pane.
-  - --target-pane is only used when a new split pane must be created.
+  - Split options are only valid with --split-window.
   - Reusing a pane returns its existing managed log file when it is still valid.
   - A missing managed log file is recreated only when the pane is not busy.
 
@@ -85,9 +90,9 @@ Examples:
   $PROGRAM_NAME
   $PROGRAM_NAME --index 0
   $PROGRAM_NAME --index 3
-  $PROGRAM_NAME --index 5 --horizontal --percent 40
   $PROGRAM_NAME --index 8 --new-window
-  $PROGRAM_NAME --target-pane %12 --vertical --percent 25
+  $PROGRAM_NAME --split-window --index 5 --horizontal --percent 40
+  $PROGRAM_NAME --split-window --target-pane %12 --vertical --percent 25
 EOF
 }
 
@@ -99,10 +104,12 @@ die() {
 }
 
 INDEX=''
-NEW_WINDOW=0
+CREATE_MODE='new-window'
+CREATE_MODE_EXPLICIT=0
 ORIENTATION='vertical'
 PERCENT=$DEFAULT_PERCENT
 TARGET_PANE=''
+SPLIT_OPTION_USED=0
 
 while [ "$#" -gt 0 ]; do
   case $1 in
@@ -116,33 +123,51 @@ while [ "$#" -gt 0 ]; do
       shift
       ;;
     -w|--new-window)
-      NEW_WINDOW=1
+      if [ "$CREATE_MODE_EXPLICIT" -eq 1 ] && [ "$CREATE_MODE" != 'new-window' ]; then
+        die 3 'cannot combine --new-window with --split-window'
+      fi
+      CREATE_MODE='new-window'
+      CREATE_MODE_EXPLICIT=1
+      shift
+      ;;
+    -s|--split-window)
+      if [ "$CREATE_MODE_EXPLICIT" -eq 1 ] && [ "$CREATE_MODE" != 'split-window' ]; then
+        die 3 'cannot combine --split-window with --new-window'
+      fi
+      CREATE_MODE='split-window'
+      CREATE_MODE_EXPLICIT=1
       shift
       ;;
     -H|--horizontal)
       ORIENTATION='horizontal'
+      SPLIT_OPTION_USED=1
       shift
       ;;
     -V|--vertical)
       ORIENTATION='vertical'
+      SPLIT_OPTION_USED=1
       shift
       ;;
     -p|--percent)
       [ "$#" -ge 2 ] || die 3 "missing value for $1"
       PERCENT=$2
+      SPLIT_OPTION_USED=1
       shift 2
       ;;
     --percent=*)
       PERCENT=${1#*=}
+      SPLIT_OPTION_USED=1
       shift
       ;;
     -t|--target-pane)
       [ "$#" -ge 2 ] || die 3 "missing value for $1"
       TARGET_PANE=$2
+      SPLIT_OPTION_USED=1
       shift 2
       ;;
     --target-pane=*)
       TARGET_PANE=${1#*=}
+      SPLIT_OPTION_USED=1
       shift
       ;;
     -h|--help)
@@ -180,12 +205,18 @@ else
   INDEX=$(allocate_index) || die 5 'unable to inspect panes in the current tmux session'
 fi
 
-is_positive_integer "$PERCENT" || die 3 'percent must be an integer between 1 and 100'
-PERCENT=$(normalize_non_negative_integer "$PERCENT")
-[ "$PERCENT" -le 100 ] || die 3 'percent must be an integer between 1 and 100'
+if [ "$CREATE_MODE" != 'split-window' ] && [ "$SPLIT_OPTION_USED" -eq 1 ]; then
+  die 3 'split options require --split-window'
+fi
 
-if [ -n "$TARGET_PANE" ]; then
-  pane_in_current_session "$TARGET_PANE" || die 3 'target pane must belong to the current tmux session'
+if [ "$CREATE_MODE" = 'split-window' ]; then
+  is_positive_integer "$PERCENT" || die 3 'percent must be an integer between 1 and 100'
+  PERCENT=$(normalize_non_negative_integer "$PERCENT")
+  [ "$PERCENT" -le 100 ] || die 3 'percent must be an integer between 1 and 100'
+
+  if [ -n "$TARGET_PANE" ]; then
+    pane_in_current_session "$TARGET_PANE" || die 3 'target pane must belong to the current tmux session'
+  fi
 fi
 
 MARK="${MARK_PREFIX}${INDEX}"
@@ -194,7 +225,7 @@ find_matching_pane "$INDEX" || die 5 'unable to inspect panes in the current tmu
 
 case $FOUND_MATCH_COUNT in
   0)
-    if [ "$NEW_WINDOW" -eq 1 ]; then
+    if [ "$CREATE_MODE" = 'new-window' ]; then
       PANE_ID=$(tmux new-window -dP -F '#{pane_id}' -t "$CURRENT_SESSION_ID" -n "skill-$INDEX" -c "$PWD" 2>/dev/null) || die 5 "failed to create a new window for $MARK"
     else
       if [ -n "$TARGET_PANE" ]; then
@@ -223,6 +254,8 @@ case $FOUND_MATCH_COUNT in
 
     tmux send-keys -l -t "$PANE_ID" "$INIT_CMD"
     tmux send-keys -t "$PANE_ID" C-m
+
+    wait_for_shell_state "$PANE_ID" 'idle' 5 || die 5 "timed out waiting for pane $PANE_ID to become ready after initialization"
     ;;
   1)
     PANE_ID=$FOUND_PANE_ID

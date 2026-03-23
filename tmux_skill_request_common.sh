@@ -2,7 +2,11 @@
 
 TMUX_SKILL_MARK_OPTION='@tmux_skill_mark'
 TMUX_SKILL_REQUEST_STATE_OPTION='@tmux_skill_request_state'
+TMUX_SKILL_SHELL_STATE_OPTION='@tmux_skill_shell_state'
 TMUX_SKILL_LOCK_PREFIX='tmux-skill-request:'
+TMUX_SKILL_INTERRUPTED_WAIT_SECONDS=1
+
+. "${SCRIPT_DIR:?SCRIPT_DIR must be set before sourcing request_common}/tmux_skill_pane_common.sh"
 
 TMUX_SKILL_INPUT_JSON=''
 TMUX_SKILL_INPUT_JSON_COMPACT=''
@@ -28,14 +32,9 @@ tmux_skill_set_error() {
   TMUX_SKILL_ERROR_MESSAGE=$2
 }
 
-tmux_skill_json_escape() {
-  escaped=$(printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g')
-  printf '%s' "$escaped"
-}
-
 tmux_skill_json_string_or_null() {
   if [ -n "$1" ]; then
-    printf '"%s"' "$(tmux_skill_json_escape "$1")"
+    printf '"%s"' "$(json_escape "$1")"
   else
     printf 'null'
   fi
@@ -47,38 +46,6 @@ tmux_skill_json_number_or_null() {
   else
     printf 'null'
   fi
-}
-
-tmux_skill_normalize_non_negative_integer() {
-  normalized=$(printf '%s' "$1" | sed 's/^0*//')
-
-  if [ -z "$normalized" ]; then
-    normalized=0
-  fi
-
-  printf '%s\n' "$normalized"
-}
-
-tmux_skill_is_non_negative_integer() {
-  case $1 in
-    ''|*[!0-9]*)
-      return 1
-      ;;
-  esac
-
-  tmux_skill_normalize_non_negative_integer "$1" >/dev/null
-}
-
-tmux_skill_is_positive_integer() {
-  tmux_skill_is_non_negative_integer "$1" || return 1
-
-  normalized=$(tmux_skill_normalize_non_negative_integer "$1")
-  [ "$normalized" -gt 0 ] 2>/dev/null
-}
-
-tmux_skill_shell_single_quote() {
-  escaped=$(printf '%s' "$1" | sed "s/'/'\\\\''/g")
-  printf "'%s'" "$escaped"
 }
 
 tmux_skill_extract_json_string_from_compact() {
@@ -226,6 +193,79 @@ tmux_skill_request_has_end_sentinel() {
   [ -n "$request_end_suffix_offset" ]
 }
 
+tmux_skill_set_request_state() {
+  state=$1
+
+  tmux set-option -p -q -t "$TMUX_SKILL_PANE_ID" "$TMUX_SKILL_REQUEST_STATE_OPTION" "$state" >/dev/null 2>&1 || {
+    tmux_skill_set_error 5 "failed to set managed request state to $state"
+    return 1
+  }
+}
+
+tmux_skill_current_shell_state() {
+  tmux show-options -p -v -q -t "$TMUX_SKILL_PANE_ID" "$TMUX_SKILL_SHELL_STATE_OPTION" 2>/dev/null
+}
+
+tmux_skill_mark_request_interrupted_if_stale() {
+  request_id=$1
+  expected_busy_state="busy:$request_id"
+  interrupted_state="interrupted:$request_id"
+  current_state=$(tmux_skill_current_request_state)
+
+  case $current_state in
+    "$interrupted_state")
+      return 0
+      ;;
+    "$expected_busy_state")
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+
+  if tmux_skill_request_has_end_sentinel "$TMUX_SKILL_LOG_FILE" "$request_id"; then
+    return 1
+  fi
+
+  shell_state=$(tmux_skill_current_shell_state)
+  [ "$shell_state" = 'idle' ] || return 1
+
+  sleep "$TMUX_SKILL_INTERRUPTED_WAIT_SECONDS"
+
+  current_state=$(tmux_skill_current_request_state)
+  case $current_state in
+    "$interrupted_state")
+      return 0
+      ;;
+    "$expected_busy_state")
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+
+  if tmux_skill_request_has_end_sentinel "$TMUX_SKILL_LOG_FILE" "$request_id"; then
+    return 1
+  fi
+
+  shell_state=$(tmux_skill_current_shell_state)
+  [ "$shell_state" = 'idle' ] || return 1
+
+  # Final request_state re-check: the managed command may have completed
+  # between our sentinel scan and now, setting request_state to idle from
+  # within the pane. Only write interrupted if still busy:ID.
+  current_state=$(tmux_skill_current_request_state)
+  case $current_state in
+    "$expected_busy_state")
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+
+  tmux_skill_set_request_state "$interrupted_state" || return 2
+}
+
 tmux_skill_reconcile_request_state() {
   current_state=$(tmux show-options -p -v -q -t "$TMUX_SKILL_PANE_ID" "$TMUX_SKILL_REQUEST_STATE_OPTION" 2>/dev/null)
 
@@ -242,11 +282,14 @@ tmux_skill_reconcile_request_state() {
       TMUX_SKILL_RECOVERY_REQUEST_ID=''
       return 1
       ;;
-    busy:*)
-      TMUX_SKILL_RECOVERY_REQUEST_ID=${current_state#busy:}
+    interrupted:*)
+      TMUX_SKILL_RECOVERY_REQUEST_ID=${current_state#interrupted:}
 
+      # Check if the command actually completed despite the interrupted state.
+      # This handles the TOCTOU race where the managed command finished between
+      # the waiter's final sentinel scan and the interrupted state write.
       if tmux_skill_request_has_end_sentinel "$TMUX_SKILL_LOG_FILE" "$TMUX_SKILL_RECOVERY_REQUEST_ID"; then
-        tmux set-option -p -q -t "$TMUX_SKILL_PANE_ID" "$TMUX_SKILL_REQUEST_STATE_OPTION" 'idle' >/dev/null 2>&1 || {
+        tmux_skill_set_request_state 'idle' || {
           tmux_skill_set_error 5 'failed to recover a stale busy managed request'
           return 2
         }
@@ -255,6 +298,50 @@ tmux_skill_reconcile_request_state() {
         TMUX_SKILL_RECOVERY_MESSAGE=''
         return 0
       fi
+
+      tmux_skill_set_request_state 'idle' || {
+        tmux_skill_set_error 5 'failed to clear an interrupted managed request'
+        return 2
+      }
+
+      TMUX_SKILL_RECOVERY_STATUS='interrupted'
+      TMUX_SKILL_RECOVERY_MESSAGE='managed request returned to the shell without a completion sentinel'
+      return 0
+      ;;
+    busy:*)
+      TMUX_SKILL_RECOVERY_REQUEST_ID=${current_state#busy:}
+
+      if tmux_skill_request_has_end_sentinel "$TMUX_SKILL_LOG_FILE" "$TMUX_SKILL_RECOVERY_REQUEST_ID"; then
+        tmux_skill_set_request_state 'idle' || {
+          tmux_skill_set_error 5 'failed to recover a stale busy managed request'
+          return 2
+        }
+
+        TMUX_SKILL_RECOVERY_STATUS='recovered'
+        TMUX_SKILL_RECOVERY_MESSAGE=''
+        return 0
+      fi
+
+      tmux_skill_mark_request_interrupted_if_stale "$TMUX_SKILL_RECOVERY_REQUEST_ID"
+      stale_interrupt_rc=$?
+
+      case $stale_interrupt_rc in
+        0)
+          tmux_skill_set_request_state 'idle' || {
+            tmux_skill_set_error 5 'failed to clear an interrupted managed request'
+            return 2
+          }
+
+          TMUX_SKILL_RECOVERY_STATUS='interrupted'
+          TMUX_SKILL_RECOVERY_MESSAGE='managed request returned to the shell without a completion sentinel'
+          return 0
+          ;;
+        1)
+          ;;
+        *)
+          return 2
+          ;;
+      esac
 
       TMUX_SKILL_RECOVERY_STATUS='busy'
       TMUX_SKILL_RECOVERY_MESSAGE='request still appears active or is not safely recoverable'
@@ -281,10 +368,10 @@ tmux_skill_send_managed_command() {
   }
 
   TMUX_SKILL_SEARCH_START_OFFSET=$(tmux_skill_byte_count "$TMUX_SKILL_LOG_FILE")
-  quoted_request_id=$(tmux_skill_shell_single_quote "$request_id")
-  quoted_command=$(tmux_skill_shell_single_quote "$command_string")
-  quoted_request_state_option=$(tmux_skill_shell_single_quote "$TMUX_SKILL_REQUEST_STATE_OPTION")
-  quoted_target_pane=$(tmux_skill_shell_single_quote "$TMUX_SKILL_PANE_ID")
+  quoted_request_id=$(shell_single_quote "$request_id")
+  quoted_command=$(shell_single_quote "$command_string")
+  quoted_request_state_option=$(shell_single_quote "$TMUX_SKILL_REQUEST_STATE_OPTION")
+  quoted_target_pane=$(shell_single_quote "$TMUX_SKILL_PANE_ID")
   wrapped_command="__tmux_skill_req=$quoted_request_id; __tmux_skill_target=$quoted_target_pane; __tmux_skill_request_option=$quoted_request_state_option; __tmux_skill_cmd=$quoted_command; printf '%s%s%s' '__TMUX_SKILL_BEGIN__' \"\$__tmux_skill_req\" '__'; eval \"\$__tmux_skill_cmd\"; __tmux_skill_rc=\$?; printf '%s%s%s%s%s' '__TMUX_SKILL_RC_BEGIN__' \"\$__tmux_skill_req\" '__' \"\$__tmux_skill_rc\" '__TMUX_SKILL_RC_END__'; printf '%s%s' \"\$__tmux_skill_req\" '__'; tmux set-option -p -t \"\$__tmux_skill_target\" \"\$__tmux_skill_request_option\" idle >/dev/null 2>&1"
 
   if ! tmux send-keys -l -t "$TMUX_SKILL_PANE_ID" "$wrapped_command" >/dev/null 2>&1; then
