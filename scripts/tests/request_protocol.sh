@@ -5,11 +5,11 @@ set -eu
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 . "$SCRIPT_DIR/test_lib.sh"
 
-ENSURE_SCRIPT="$TEST_ROOT_DIR/ensure_tmux_skill_pane.sh"
-SUBMIT_SCRIPT="$TEST_ROOT_DIR/submit_tmux_skill_pane_request.sh"
-WAIT_SCRIPT="$TEST_ROOT_DIR/wait_for_tmux_skill_pane_request.sh"
-RUN_SCRIPT="$TEST_ROOT_DIR/run_in_tmux_skill_pane.sh"
-RECOVER_SCRIPT="$TEST_ROOT_DIR/recover_tmux_skill_pane.sh"
+ENSURE_SCRIPT="$TEST_ROOT_DIR/ensure_pane.sh"
+SUBMIT_SCRIPT="$TEST_ROOT_DIR/submit_request.sh"
+WAIT_SCRIPT="$TEST_ROOT_DIR/wait_for_request.sh"
+RUN_SCRIPT="$TEST_ROOT_DIR/run_in_pane.sh"
+RECOVER_SCRIPT="$TEST_ROOT_DIR/recover_pane.sh"
 
 SUITE_INDEX=${TMUX_SKILL_TEST_INDEX:-$((930000 + ($$ % 10000)))}
 

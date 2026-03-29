@@ -5,19 +5,19 @@ set -eu
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 . "$SCRIPT_DIR/test_lib.sh"
 
-CHECK_SCRIPT="$TEST_ROOT_DIR/check_tmux.sh"
-ENSURE_SCRIPT="$TEST_ROOT_DIR/ensure_tmux_skill_pane.sh"
-ADOPT_SCRIPT="$TEST_ROOT_DIR/adopt_tmux_skill_pane.sh"
-SUBMIT_SCRIPT="$TEST_ROOT_DIR/submit_tmux_skill_pane_request.sh"
-WAIT_SCRIPT="$TEST_ROOT_DIR/wait_for_tmux_skill_pane_request.sh"
-RUN_SCRIPT="$TEST_ROOT_DIR/run_in_tmux_skill_pane.sh"
-RECOVER_SCRIPT="$TEST_ROOT_DIR/recover_tmux_skill_pane.sh"
+CHECK_SCRIPT="$TEST_ROOT_DIR/check_env.sh"
+ENSURE_SCRIPT="$TEST_ROOT_DIR/ensure_pane.sh"
+ADOPT_SCRIPT="$TEST_ROOT_DIR/adopt_pane.sh"
+SUBMIT_SCRIPT="$TEST_ROOT_DIR/submit_request.sh"
+WAIT_SCRIPT="$TEST_ROOT_DIR/wait_for_request.sh"
+RUN_SCRIPT="$TEST_ROOT_DIR/run_in_pane.sh"
+RECOVER_SCRIPT="$TEST_ROOT_DIR/recover_pane.sh"
 
 trap cleanup_test_resources EXIT HUP INT TERM
 
 require_tmux_session
 
-printf 'cli_validation: check_tmux environment guards ... '
+printf 'cli_validation: check_env environment guards ... '
 
 "$CHECK_SCRIPT" >/dev/null 2>&1
 
@@ -28,8 +28,8 @@ env PATH=/definitely-missing "$CHECK_SCRIPT" >/dev/null 2>&1
 missing_tmux_rc=$?
 set -e
 
-assert_equals '2' "$outside_tmux_rc" 'check_tmux outside tmux'
-assert_equals '127' "$missing_tmux_rc" 'check_tmux without tmux in PATH'
+assert_equals '2' "$outside_tmux_rc" 'check_env outside tmux'
+assert_equals '127' "$missing_tmux_rc" 'check_env without tmux in PATH'
 
 printf 'ok\n'
 

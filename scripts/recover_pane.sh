@@ -2,7 +2,7 @@
 
 PROGRAM_NAME=${0##*/}
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-RUN_SCRIPT="$SCRIPT_DIR/run_in_tmux_skill_pane.sh"
+RUN_SCRIPT="$SCRIPT_DIR/run_in_pane.sh"
 
 . "$SCRIPT_DIR/common/pane_common.sh"
 
@@ -24,7 +24,7 @@ show_help() {
 Usage:
   $PROGRAM_NAME < ensure.json
 
-Read one ensure_tmux_skill_pane.sh JSON object from standard input and safely
+Read one ensure_pane.sh JSON object from standard input and safely
 reconcile the managed request state.
 
 Input JSON fields:

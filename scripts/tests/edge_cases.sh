@@ -7,10 +7,10 @@ set -eu
 
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 ROOT_DIR=$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)
-ENSURE_SCRIPT="$ROOT_DIR/ensure_tmux_skill_pane.sh"
-RUN_SCRIPT="$ROOT_DIR/run_in_tmux_skill_pane.sh"
-SUBMIT_SCRIPT="$ROOT_DIR/submit_tmux_skill_pane_request.sh"
-RECOVER_SCRIPT="$ROOT_DIR/recover_tmux_skill_pane.sh"
+ENSURE_SCRIPT="$ROOT_DIR/ensure_pane.sh"
+RUN_SCRIPT="$ROOT_DIR/run_in_pane.sh"
+SUBMIT_SCRIPT="$ROOT_DIR/submit_request.sh"
+RECOVER_SCRIPT="$ROOT_DIR/recover_pane.sh"
 
 ENSURE_FILE=''
 WINDOW_ID=''

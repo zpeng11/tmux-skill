@@ -5,8 +5,8 @@ set -eu
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 . "$SCRIPT_DIR/test_lib.sh"
 
-ENSURE_SCRIPT="$TEST_ROOT_DIR/ensure_tmux_skill_pane.sh"
-ADOPT_SCRIPT="$TEST_ROOT_DIR/adopt_tmux_skill_pane.sh"
+ENSURE_SCRIPT="$TEST_ROOT_DIR/ensure_pane.sh"
+ADOPT_SCRIPT="$TEST_ROOT_DIR/adopt_pane.sh"
 
 SUITE_INDEX_BASE=${TMUX_SKILL_TEST_INDEX:-$((920000 + ($$ % 10000)))}
 

@@ -18,7 +18,7 @@ Usage:
   $PROGRAM_NAME --request-id ID --timeout-seconds N [--search-start-offset M] < ensure.json
   $PROGRAM_NAME --request-id ID --query-only [--search-start-offset M] < ensure.json
 
-Read one ensure_tmux_skill_pane.sh JSON object from standard input, then wait
+Read one ensure_pane.sh JSON object from standard input, then wait
 for or query one managed request result.
 
 Options:

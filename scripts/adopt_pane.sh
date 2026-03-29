@@ -17,7 +17,7 @@ Usage:
 Adopt one existing tmux pane in the current session and configure it as a
 managed tmux-skill pane.
 
-Successful output is always JSON and matches ensure_tmux_skill_pane.sh.
+Successful output is always JSON and matches ensure_pane.sh.
 
 Options:
   --pane-id ID         Existing pane ID to adopt. Required.

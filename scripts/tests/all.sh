@@ -4,7 +4,7 @@ set -eu
 
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 ROOT_DIR=$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)
-CHECK_TMUX_SCRIPT="$ROOT_DIR/check_tmux.sh"
+CHECK_ENV_SCRIPT="$ROOT_DIR/check_env.sh"
 
 SUITES='
 helper_units.sh
@@ -15,7 +15,7 @@ request_flow.sh
 edge_cases.sh
 '
 
-"$CHECK_TMUX_SCRIPT" >/dev/null
+"$CHECK_ENV_SCRIPT" >/dev/null
 
 old_ifs=$IFS
 IFS='

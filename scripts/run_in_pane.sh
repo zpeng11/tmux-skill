@@ -2,8 +2,8 @@
 
 PROGRAM_NAME=${0##*/}
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-SUBMIT_SCRIPT="$SCRIPT_DIR/submit_tmux_skill_pane_request.sh"
-WAIT_SCRIPT="$SCRIPT_DIR/wait_for_tmux_skill_pane_request.sh"
+SUBMIT_SCRIPT="$SCRIPT_DIR/submit_request.sh"
+WAIT_SCRIPT="$SCRIPT_DIR/wait_for_request.sh"
 # shellcheck source=./common/request_common.sh
 . "$SCRIPT_DIR/common/request_common.sh"
 
@@ -25,7 +25,7 @@ Usage:
   $PROGRAM_NAME --cmd COMMAND --timeout-seconds N < ensure.json
   $PROGRAM_NAME --recover-only < ensure.json
 
-Read one ensure_tmux_skill_pane.sh JSON object from standard input, send one
+Read one ensure_pane.sh JSON object from standard input, send one
 single-line shell command to the managed pane and wait for its result, or
 safely reconcile the managed request state, and emit one JSON result.
 

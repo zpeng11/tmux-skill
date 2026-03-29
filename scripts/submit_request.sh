@@ -16,7 +16,7 @@ show_help() {
 Usage:
   $PROGRAM_NAME --cmd COMMAND < ensure.json
 
-Read one ensure_tmux_skill_pane.sh JSON object from standard input, submit one
+Read one ensure_pane.sh JSON object from standard input, submit one
 single-line shell command to the managed pane, and return immediately with a
 request ticket.
 
