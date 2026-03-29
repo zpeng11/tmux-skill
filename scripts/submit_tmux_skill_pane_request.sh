@@ -2,8 +2,8 @@
 
 PROGRAM_NAME=${0##*/}
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-# shellcheck source=./tmux_skill_request_common.sh
-. "$SCRIPT_DIR/tmux_skill_request_common.sh"
+# shellcheck source=./common/request_common.sh
+. "$SCRIPT_DIR/common/request_common.sh"
 
 STATUS='error'
 MESSAGE=''

@@ -15,7 +15,7 @@ trap cleanup_test_resources EXIT HUP INT TERM
 require_tmux_session
 
 SCRIPT_DIR=$TEST_ROOT_DIR
-. "$TEST_ROOT_DIR/tmux_skill_pane_common.sh"
+. "$TEST_ROOT_DIR/common/pane_common.sh"
 
 CURRENT_SESSION_ID=$(tmux display-message -p '#{session_id}' 2>/dev/null) || fail 'unable to determine current tmux session'
 

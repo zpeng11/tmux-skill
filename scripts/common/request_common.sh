@@ -6,7 +6,7 @@ TMUX_SKILL_SHELL_STATE_OPTION='@tmux_skill_shell_state'
 TMUX_SKILL_LOCK_PREFIX='tmux-skill-request:'
 TMUX_SKILL_INTERRUPTED_WAIT_SECONDS=1
 
-. "${SCRIPT_DIR:?SCRIPT_DIR must be set before sourcing request_common}/tmux_skill_pane_common.sh"
+. "${SCRIPT_DIR:?SCRIPT_DIR must be set before sourcing request_common}/common/pane_common.sh"
 
 TMUX_SKILL_INPUT_JSON=''
 TMUX_SKILL_INPUT_JSON_COMPACT=''

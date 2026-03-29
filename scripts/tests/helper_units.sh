@@ -5,12 +5,12 @@ set -eu
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 . "$SCRIPT_DIR/test_lib.sh"
 
-PANE_COMMON="$TEST_ROOT_DIR/tmux_skill_pane_common.sh"
-REQUEST_COMMON="$TEST_ROOT_DIR/tmux_skill_request_common.sh"
+PANE_COMMON="$TEST_ROOT_DIR/common/pane_common.sh"
+REQUEST_COMMON="$TEST_ROOT_DIR/common/request_common.sh"
 
 trap cleanup_test_resources EXIT HUP INT TERM
 
-# request_common expects SCRIPT_DIR to point at the repo root.
+# request_common expects SCRIPT_DIR to point at the scripts root.
 SCRIPT_DIR=$TEST_ROOT_DIR
 . "$PANE_COMMON"
 SCRIPT_DIR=$TEST_ROOT_DIR

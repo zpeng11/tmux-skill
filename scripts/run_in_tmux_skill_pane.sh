@@ -4,8 +4,8 @@ PROGRAM_NAME=${0##*/}
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 SUBMIT_SCRIPT="$SCRIPT_DIR/submit_tmux_skill_pane_request.sh"
 WAIT_SCRIPT="$SCRIPT_DIR/wait_for_tmux_skill_pane_request.sh"
-# shellcheck source=./tmux_skill_request_common.sh
-. "$SCRIPT_DIR/tmux_skill_request_common.sh"
+# shellcheck source=./common/request_common.sh
+. "$SCRIPT_DIR/common/request_common.sh"
 
 RECOVER_ONLY=0
 STATUS='error'

@@ -2,8 +2,8 @@
 
 PROGRAM_NAME=${0##*/}
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-# shellcheck source=./tmux_skill_pane_common.sh
-. "$SCRIPT_DIR/tmux_skill_pane_common.sh"
+# shellcheck source=./common/pane_common.sh
+. "$SCRIPT_DIR/common/pane_common.sh"
 
 BOOTSTRAP_TIMEOUT_SECONDS=5
 PANE_ID=''

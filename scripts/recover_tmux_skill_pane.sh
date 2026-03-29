@@ -4,7 +4,7 @@ PROGRAM_NAME=${0##*/}
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 RUN_SCRIPT="$SCRIPT_DIR/run_in_tmux_skill_pane.sh"
 
-. "$SCRIPT_DIR/tmux_skill_pane_common.sh"
+. "$SCRIPT_DIR/common/pane_common.sh"
 
 fail_json() {
   message=$1
