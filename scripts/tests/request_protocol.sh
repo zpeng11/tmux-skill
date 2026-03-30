@@ -8,7 +8,6 @@ SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 ENSURE_SCRIPT="$TEST_ROOT_DIR/ensure_pane.sh"
 SUBMIT_SCRIPT="$TEST_ROOT_DIR/submit_request.sh"
 WAIT_SCRIPT="$TEST_ROOT_DIR/wait_for_request.sh"
-RUN_SCRIPT="$TEST_ROOT_DIR/run_in_pane.sh"
 RECOVER_SCRIPT="$TEST_ROOT_DIR/recover_pane.sh"
 
 SUITE_INDEX=${TMUX_SKILL_TEST_INDEX:-$((930000 + ($$ % 10000)))}
@@ -64,17 +63,19 @@ assert_equals '0' "$(json_number_or_null_field "$pending_final_output" exit_code
 
 printf 'ok\n'
 
-printf 'request_protocol: run_in propagates timeout and keeps request recoverable ... '
+printf 'request_protocol: wait propagates timeout and keeps request recoverable ... '
+
+run_timeout_submit=$("$SUBMIT_SCRIPT" --cmd 'sleep 4' < "$ensure_file")
+run_timeout_request_id=$(json_string_field "$run_timeout_submit" request_id)
+assert_non_empty "$run_timeout_request_id" 'run timeout request id'
 
 set +e
-run_timeout_output=$("$RUN_SCRIPT" --cmd 'sleep 4' --timeout-seconds 1 < "$ensure_file")
+run_timeout_output=$("$WAIT_SCRIPT" --request-id "$run_timeout_request_id" --timeout-seconds 1 < "$ensure_file")
 run_timeout_rc=$?
 set -e
 
 assert_equals '7' "$run_timeout_rc" 'run timeout rc'
 assert_equals 'timeout' "$(json_string_field "$run_timeout_output" status)" 'run timeout status'
-run_timeout_request_id=$(json_string_field "$run_timeout_output" request_id)
-assert_non_empty "$run_timeout_request_id" 'run timeout request id'
 
 run_timeout_final=$("$WAIT_SCRIPT" --request-id "$run_timeout_request_id" --timeout-seconds 10 < "$ensure_file")
 assert_equals 'ok' "$(json_string_field "$run_timeout_final" status)" 'run timeout final status'
@@ -100,7 +101,7 @@ wait "$INTERRUPTER_PID" || true
 assert_equals '130' "$interrupt_wait_rc" 'interrupt blocking wait rc'
 assert_equals 'interrupted' "$(json_string_field "$interrupt_wait_output" status)" 'interrupt blocking wait status'
 
-run_interrupt_recover=$("$RUN_SCRIPT" --recover-only < "$ensure_file")
+run_interrupt_recover=$("$RECOVER_SCRIPT" < "$ensure_file")
 assert_equals 'interrupted' "$(json_string_field "$run_interrupt_recover" status)" 'run recover interrupted status'
 assert_equals "$interrupt_request_id" "$(json_string_field "$run_interrupt_recover" request_id)" 'run recover interrupted request'
 wait_for_request_state "$pane_id" 'idle' 10
@@ -126,7 +127,7 @@ tmux set-option -p -q -t "$pane_id" '@tmux_skill_shell_state' 'busy' >/dev/null 
 tmux set-option -p -q -t "$pane_id" '@tmux_skill_request_state' 'busy:active-request' >/dev/null 2>&1 || fail 'failed to set request busy:ID'
 
 set +e
-active_busy_output=$("$RUN_SCRIPT" --recover-only < "$ensure_file")
+active_busy_output=$("$RECOVER_SCRIPT" < "$ensure_file")
 active_busy_rc=$?
 set -e
 
@@ -140,7 +141,7 @@ tmux set-option -p -q -t "$pane_id" '@tmux_skill_request_state' 'idle' >/dev/nul
 tmux set-option -p -q -t "$pane_id" '@tmux_skill_request_state' 'busy' >/dev/null 2>&1 || fail 'failed to set legacy busy state'
 
 set +e
-legacy_busy_output=$("$RUN_SCRIPT" --recover-only < "$ensure_file")
+legacy_busy_output=$("$RECOVER_SCRIPT" < "$ensure_file")
 legacy_busy_rc=$?
 set -e
 
@@ -149,12 +150,14 @@ assert_equals 'busy' "$(json_string_field "$legacy_busy_output" status)" 'legacy
 assert_equals 'target pane uses a legacy busy state without a recoverable request id' "$(json_string_field "$legacy_busy_output" message)" 'legacy busy recover message'
 tmux set-option -p -q -t "$pane_id" '@tmux_skill_request_state' 'idle' >/dev/null 2>&1 || fail 'failed to restore request idle after legacy busy'
 
-recovered_seed_output=$("$RUN_SCRIPT" --cmd 'printf recovered-seed' --timeout-seconds 5 < "$ensure_file")
-recovered_seed_request=$(json_string_field "$recovered_seed_output" request_id)
+recovered_seed_submit=$("$SUBMIT_SCRIPT" --cmd 'printf recovered-seed' < "$ensure_file")
+recovered_seed_request=$(json_string_field "$recovered_seed_submit" request_id)
 assert_non_empty "$recovered_seed_request" 'recovered seed request id'
+recovered_seed_wait=$("$WAIT_SCRIPT" --request-id "$recovered_seed_request" --timeout-seconds 5 < "$ensure_file")
+assert_equals 'ok' "$(json_string_field "$recovered_seed_wait" status)" 'recovered seed wait status'
 tmux set-option -p -q -t "$pane_id" '@tmux_skill_request_state' "busy:$recovered_seed_request" >/dev/null 2>&1 || fail 'failed to seed stale busy state'
 
-recovered_output=$("$RUN_SCRIPT" --recover-only < "$ensure_file")
+recovered_output=$("$RECOVER_SCRIPT" < "$ensure_file")
 assert_equals 'recovered' "$(json_string_field "$recovered_output" status)" 'recovered state status'
 assert_equals "$recovered_seed_request" "$(json_string_field "$recovered_output" request_id)" 'recovered state request'
 
@@ -162,9 +165,11 @@ printf 'ok\n'
 
 printf 'request_protocol: submit reconciles stale busy states before starting a new request ... '
 
-stale_submit_seed=$("$RUN_SCRIPT" --cmd 'printf stale-submit-seed' --timeout-seconds 5 < "$ensure_file")
-stale_submit_request=$(json_string_field "$stale_submit_seed" request_id)
+stale_submit_seed_submit=$("$SUBMIT_SCRIPT" --cmd 'printf stale-submit-seed' < "$ensure_file")
+stale_submit_request=$(json_string_field "$stale_submit_seed_submit" request_id)
 assert_non_empty "$stale_submit_request" 'stale submit seed request'
+stale_submit_seed_wait=$("$WAIT_SCRIPT" --request-id "$stale_submit_request" --timeout-seconds 5 < "$ensure_file")
+assert_equals 'ok' "$(json_string_field "$stale_submit_seed_wait" status)" 'stale submit seed wait status'
 tmux set-option -p -q -t "$pane_id" '@tmux_skill_request_state' "busy:$stale_submit_request" >/dev/null 2>&1 || fail 'failed to seed stale submit state'
 
 stale_submit_output=$("$SUBMIT_SCRIPT" --cmd 'printf post-stale-submit' < "$ensure_file")
@@ -204,13 +209,13 @@ assert_equals 'failed to parse command exit code from log' "$(json_string_field 
 
 printf 'ok\n'
 
-printf 'request_protocol: run_in busy passthrough and recover wrapper parity ... '
+printf 'request_protocol: submit busy passthrough ... '
 
 tmux send-keys -t "$pane_id" 'sleep 30' C-m >/dev/null 2>&1 || fail 'failed to start unmanaged busy command'
 wait_for_shell_state "$pane_id" 'busy' 10
 
 set +e
-run_busy_output=$("$RUN_SCRIPT" --cmd 'printf should-not-run' --timeout-seconds 1 < "$ensure_file")
+run_busy_output=$("$SUBMIT_SCRIPT" --cmd 'printf should-not-run' < "$ensure_file")
 run_busy_rc=$?
 set -e
 
@@ -221,10 +226,8 @@ assert_equals 'target pane shell is busy with an unmanaged command' "$(json_stri
 tmux send-keys -t "$pane_id" C-c >/dev/null 2>&1 || fail 'failed to interrupt unmanaged busy command'
 wait_for_shell_state "$pane_id" 'idle' 10
 
-run_idle_recover=$("$RUN_SCRIPT" --recover-only < "$ensure_file")
 recover_idle=$("$RECOVER_SCRIPT" < "$ensure_file")
-assert_equals 'idle' "$(json_string_field "$run_idle_recover" status)" 'run idle recover status'
-assert_equals 'idle' "$(json_string_field "$recover_idle" status)" 'recover idle wrapper status'
+assert_equals 'idle' "$(json_string_field "$recover_idle" status)" 'recover idle status'
 
 printf 'ok\n'
 printf 'request_protocol.sh: ok\n'

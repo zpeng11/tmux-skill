@@ -2,22 +2,12 @@
 
 PROGRAM_NAME=${0##*/}
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-RUN_SCRIPT="$SCRIPT_DIR/run_in_pane.sh"
+# shellcheck source=./common/request_common.sh
+. "$SCRIPT_DIR/common/request_common.sh"
 
-. "$SCRIPT_DIR/common/pane_common.sh"
-
-fail_json() {
-  message=$1
-  printf '{'
-  printf '"status":"error",'
-  printf '"mark":null,'
-  printf '"pane_id":null,'
-  printf '"log_file":null,'
-  printf '"request_id":null,'
-  printf '"message":"%s"' "$(json_escape "$message")"
-  printf '}\n'
-  exit 3
-}
+STATUS='error'
+REQUEST_ID=''
+MESSAGE=''
 
 show_help() {
   cat <<EOF
@@ -59,6 +49,37 @@ Exit codes:
 EOF
 }
 
+output_json() {
+  printf '{'
+  printf '"status":"%s",' "$(json_escape "$STATUS")"
+  printf '"mark":'; tmux_skill_json_string_or_null "$TMUX_SKILL_MARK"; printf ','
+  printf '"pane_id":'; tmux_skill_json_string_or_null "$TMUX_SKILL_PANE_ID"; printf ','
+  printf '"log_file":'; tmux_skill_json_string_or_null "$TMUX_SKILL_LOG_FILE"; printf ','
+  printf '"request_id":'; tmux_skill_json_string_or_null "$REQUEST_ID"; printf ','
+  printf '"message":'; tmux_skill_json_string_or_null "$MESSAGE"
+  printf '}\n'
+}
+
+cleanup() {
+  tmux_skill_cleanup
+}
+
+emit_and_exit() {
+  exit_code=$1
+  cleanup
+  output_json
+  exit "$exit_code"
+}
+
+fail_json() {
+  exit_code=$1
+  STATUS=$2
+  MESSAGE=$3
+  emit_and_exit "$exit_code"
+}
+
+trap cleanup EXIT HUP INT TERM
+
 while [ "$#" -gt 0 ]; do
   case $1 in
     -h|--help)
@@ -70,16 +91,37 @@ while [ "$#" -gt 0 ]; do
       break
       ;;
     -*)
-      fail_json "unknown option: $1"
+      fail_json 3 error "unknown option: $1"
       ;;
     *)
-      fail_json "unexpected argument: $1"
+      fail_json 3 error "unexpected argument: $1"
       ;;
   esac
 done
 
-[ "$#" -eq 0 ] || {
-  fail_json "unexpected argument: $1"
-}
+[ "$#" -eq 0 ] || fail_json 3 error "unexpected argument: $1"
 
-exec "$RUN_SCRIPT" --recover-only
+tmux_skill_require_tmux_session || fail_json "$TMUX_SKILL_ERROR_CODE" error "$TMUX_SKILL_ERROR_MESSAGE"
+tmux_skill_load_ensure_json_from_stdin || fail_json "$TMUX_SKILL_ERROR_CODE" error "$TMUX_SKILL_ERROR_MESSAGE"
+tmux_skill_lock_request || fail_json "$TMUX_SKILL_ERROR_CODE" error "$TMUX_SKILL_ERROR_MESSAGE"
+
+tmux_skill_reconcile_request_state
+reconcile_rc=$?
+
+case $reconcile_rc in
+  0)
+    REQUEST_ID=$TMUX_SKILL_RECOVERY_REQUEST_ID
+    STATUS=$TMUX_SKILL_RECOVERY_STATUS
+    MESSAGE=$TMUX_SKILL_RECOVERY_MESSAGE
+    emit_and_exit 0
+    ;;
+  1)
+    REQUEST_ID=$TMUX_SKILL_RECOVERY_REQUEST_ID
+    STATUS=$TMUX_SKILL_RECOVERY_STATUS
+    MESSAGE=$TMUX_SKILL_RECOVERY_MESSAGE
+    emit_and_exit 4
+    ;;
+  *)
+    fail_json "$TMUX_SKILL_ERROR_CODE" error "$TMUX_SKILL_ERROR_MESSAGE"
+    ;;
+esac

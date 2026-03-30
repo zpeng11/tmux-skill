@@ -8,8 +8,8 @@ set -eu
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 ROOT_DIR=$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)
 ENSURE_SCRIPT="$ROOT_DIR/ensure_pane.sh"
-RUN_SCRIPT="$ROOT_DIR/run_in_pane.sh"
 SUBMIT_SCRIPT="$ROOT_DIR/submit_request.sh"
+WAIT_SCRIPT="$ROOT_DIR/wait_for_request.sh"
 RECOVER_SCRIPT="$ROOT_DIR/recover_pane.sh"
 
 ENSURE_FILE=''
@@ -119,7 +119,9 @@ printf '%s' "$ENSURE_JSON" > "$ENSURE_FILE" || fail 'failed to stage ensure json
 # ============================================================================
 printf 'T2: submit immediately after ensure succeeds ... '
 
-run_output=$("$RUN_SCRIPT" --cmd 'printf immediate-after-ensure' --timeout-seconds 5 < "$ENSURE_FILE")
+t2_submit=$("$SUBMIT_SCRIPT" --cmd 'printf immediate-after-ensure' < "$ENSURE_FILE")
+t2_request_id=$(json_string_field "$t2_submit" request_id)
+run_output=$("$WAIT_SCRIPT" --request-id "$t2_request_id" --timeout-seconds 5 < "$ENSURE_FILE")
 assert_equals 'ok' "$(json_string_field "$run_output" status)" 'T2 status'
 assert_equals '0' "$(json_number_or_null_field "$run_output" exit_code)" 'T2 exit_code'
 
@@ -172,10 +174,10 @@ PASSED=$((PASSED + 1))
 printf 'T5: reconcile recovers completed command in interrupted state ... '
 
 # Run a fast command to get its request_id and sentinel in the log
-fast_output=$("$RUN_SCRIPT" --cmd 'printf sentinel-check' --timeout-seconds 5 < "$ENSURE_FILE")
+fast_submit=$("$SUBMIT_SCRIPT" --cmd 'printf sentinel-check' < "$ENSURE_FILE")
+fast_request_id=$(json_string_field "$fast_submit" request_id)
+fast_output=$("$WAIT_SCRIPT" --request-id "$fast_request_id" --timeout-seconds 5 < "$ENSURE_FILE")
 assert_equals 'ok' "$(json_string_field "$fast_output" status)" 'T5 prereq status'
-
-fast_request_id=$(json_string_field "$fast_output" request_id)
 assert_non_empty "$fast_request_id" 'T5 prereq request_id'
 
 # Simulate the TOCTOU race: manually set state to interrupted:REQUEST_ID
@@ -200,7 +202,9 @@ PASSED=$((PASSED + 1))
 # ============================================================================
 printf 'T6: post-TOCTOU-recovery command works ... '
 
-post_output=$("$RUN_SCRIPT" --cmd 'printf post-toctou-recovery' --timeout-seconds 5 < "$ENSURE_FILE")
+post_submit=$("$SUBMIT_SCRIPT" --cmd 'printf post-toctou-recovery' < "$ENSURE_FILE")
+post_request_id=$(json_string_field "$post_submit" request_id)
+post_output=$("$WAIT_SCRIPT" --request-id "$post_request_id" --timeout-seconds 5 < "$ENSURE_FILE")
 assert_equals 'ok' "$(json_string_field "$post_output" status)" 'T6 status'
 assert_equals '0' "$(json_number_or_null_field "$post_output" exit_code)" 'T6 exit_code'
 
@@ -214,7 +218,9 @@ PASSED=$((PASSED + 1))
 # ============================================================================
 printf 'T7: non-zero exit code captured correctly ... '
 
-nonzero_output=$("$RUN_SCRIPT" --cmd 'sh -c "exit 42"' --timeout-seconds 5 < "$ENSURE_FILE")
+nonzero_submit=$("$SUBMIT_SCRIPT" --cmd 'sh -c "exit 42"' < "$ENSURE_FILE")
+nonzero_request_id=$(json_string_field "$nonzero_submit" request_id)
+nonzero_output=$("$WAIT_SCRIPT" --request-id "$nonzero_request_id" --timeout-seconds 5 < "$ENSURE_FILE")
 
 assert_equals 'ok' "$(json_string_field "$nonzero_output" status)" 'T7 status'
 assert_equals '42' "$(json_number_or_null_field "$nonzero_output" exit_code)" 'T7 exit_code'

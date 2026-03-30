@@ -5,7 +5,6 @@ set -eu
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 ROOT_DIR=$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)
 ENSURE_SCRIPT="$ROOT_DIR/ensure_pane.sh"
-RUN_SCRIPT="$ROOT_DIR/run_in_pane.sh"
 WAIT_SCRIPT="$ROOT_DIR/wait_for_request.sh"
 RECOVER_SCRIPT="$ROOT_DIR/recover_pane.sh"
 SUBMIT_SCRIPT="$ROOT_DIR/submit_request.sh"
@@ -94,19 +93,23 @@ assert_non_empty "$WINDOW_ID" 'window_id'
 ENSURE_FILE=$(mktemp "${TMPDIR:-/tmp}/tmux-skill.test.XXXXXX.json") || fail 'failed to create ensure temp file'
 printf '%s' "$ENSURE_JSON" > "$ENSURE_FILE" || fail 'failed to stage ensure json'
 
-normal_output=$("$RUN_SCRIPT" --cmd 'printf normal-output' --timeout-seconds 5 < "$ENSURE_FILE")
+normal_submit=$("$SUBMIT_SCRIPT" --cmd 'printf normal-output' < "$ENSURE_FILE")
+normal_request_id=$(json_string_field "$normal_submit" request_id)
+normal_output=$("$WAIT_SCRIPT" --request-id "$normal_request_id" --timeout-seconds 5 < "$ENSURE_FILE")
 assert_equals 'ok' "$(json_string_field "$normal_output" status)" 'normal status'
 assert_equals '0' "$(json_number_or_null_field "$normal_output" exit_code)" 'normal exit_code'
 
 set +e
 ( sleep 2; tmux send-keys -t "$PANE_ID" C-c >/dev/null 2>&1 ) &
 INTERRUPTER_PID=$!
-interrupt_output=$("$RUN_SCRIPT" --cmd 'sleep 30' --timeout-seconds 10 < "$ENSURE_FILE")
+interrupt_submit=$("$SUBMIT_SCRIPT" --cmd 'sleep 30' < "$ENSURE_FILE")
+interrupt_request_id=$(json_string_field "$interrupt_submit" request_id)
+interrupt_output=$("$WAIT_SCRIPT" --request-id "$interrupt_request_id" --timeout-seconds 10 < "$ENSURE_FILE")
 interrupt_rc=$?
 set -e
 wait "$INTERRUPTER_PID" || true
 
-assert_equals '130' "$interrupt_rc" 'interrupt run exit code'
+assert_equals '130' "$interrupt_rc" 'interrupt wait exit code'
 assert_equals 'interrupted' "$(json_string_field "$interrupt_output" status)" 'interrupt status'
 assert_equals 'null' "$(json_number_or_null_field "$interrupt_output" exit_code)" 'interrupt exit_code'
 
@@ -128,7 +131,9 @@ assert_equals "$interrupt_request_id" "$(json_string_field "$recover_output" req
 request_state=$(tmux show-options -p -v -q -t "$PANE_ID" '@tmux_skill_request_state' 2>/dev/null || true)
 assert_equals 'idle' "$request_state" 'request state after recover'
 
-post_recover_output=$("$RUN_SCRIPT" --cmd 'printf post-recover' --timeout-seconds 5 < "$ENSURE_FILE")
+post_recover_submit=$("$SUBMIT_SCRIPT" --cmd 'printf post-recover' < "$ENSURE_FILE")
+post_recover_request_id=$(json_string_field "$post_recover_submit" request_id)
+post_recover_output=$("$WAIT_SCRIPT" --request-id "$post_recover_request_id" --timeout-seconds 5 < "$ENSURE_FILE")
 assert_equals 'ok' "$(json_string_field "$post_recover_output" status)" 'post-recover status'
 assert_equals '0' "$(json_number_or_null_field "$post_recover_output" exit_code)" 'post-recover exit_code'
 
