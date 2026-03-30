@@ -6,7 +6,6 @@ SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 . "$SCRIPT_DIR/test_lib.sh"
 
 CHECK_SCRIPT="$TEST_ROOT_DIR/check_env.sh"
-ENSURE_SCRIPT="$TEST_ROOT_DIR/ensure_pane.sh"
 ADOPT_SCRIPT="$TEST_ROOT_DIR/adopt_pane.sh"
 SUBMIT_SCRIPT="$TEST_ROOT_DIR/submit_request.sh"
 WAIT_SCRIPT="$TEST_ROOT_DIR/wait_for_request.sh"
@@ -29,32 +28,6 @@ set -e
 
 assert_equals '2' "$outside_tmux_rc" 'check_env outside tmux'
 assert_equals '127' "$missing_tmux_rc" 'check_env without tmux in PATH'
-
-printf 'ok\n'
-
-printf 'cli_validation: ensure argument guards ... '
-
-set +e
-"$ENSURE_SCRIPT" --index abc >/dev/null 2>&1
-ensure_bad_index_rc=$?
-"$ENSURE_SCRIPT" --horizontal >/dev/null 2>&1
-ensure_split_without_mode_rc=$?
-"$ENSURE_SCRIPT" --split-window --new-window >/dev/null 2>&1
-ensure_conflict_rc=$?
-"$ENSURE_SCRIPT" --split-window --percent 0 >/dev/null 2>&1
-ensure_bad_percent_rc=$?
-"$ENSURE_SCRIPT" --split-window --target-pane %999999 >/dev/null 2>&1
-ensure_bad_target_rc=$?
-env -u TMUX "$ENSURE_SCRIPT" --index 1 >/dev/null 2>&1
-ensure_outside_tmux_rc=$?
-set -e
-
-assert_equals '3' "$ensure_bad_index_rc" 'ensure bad index'
-assert_equals '3' "$ensure_split_without_mode_rc" 'ensure split option without split mode'
-assert_equals '3' "$ensure_conflict_rc" 'ensure conflicting create modes'
-assert_equals '3' "$ensure_bad_percent_rc" 'ensure bad percent'
-assert_equals '3' "$ensure_bad_target_rc" 'ensure invalid target pane'
-assert_equals '2' "$ensure_outside_tmux_rc" 'ensure outside tmux'
 
 printf 'ok\n'
 

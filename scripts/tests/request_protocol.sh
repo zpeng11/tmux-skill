@@ -5,7 +5,7 @@ set -eu
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 . "$SCRIPT_DIR/test_lib.sh"
 
-ENSURE_SCRIPT="$TEST_ROOT_DIR/ensure_pane.sh"
+ADOPT_SCRIPT="$TEST_ROOT_DIR/adopt_pane.sh"
 SUBMIT_SCRIPT="$TEST_ROOT_DIR/submit_request.sh"
 WAIT_SCRIPT="$TEST_ROOT_DIR/wait_for_request.sh"
 RECOVER_SCRIPT="$TEST_ROOT_DIR/recover_pane.sh"
@@ -25,9 +25,9 @@ ensure_fixture_file() {
 
 printf 'request_protocol: provisioning managed pane ... '
 
-ensure_output=$("$ENSURE_SCRIPT" --index "$SUITE_INDEX" --new-window)
+pane_id=$(tmux new-window -dP -F '#{pane_id}' -n "skill-$SUITE_INDEX" -c "$PWD")
+ensure_output=$("$ADOPT_SCRIPT" --pane-id "$pane_id" --index "$SUITE_INDEX")
 mark=$(json_string_field "$ensure_output" mark)
-pane_id=$(json_string_field "$ensure_output" pane_id)
 log_file=$(json_string_field "$ensure_output" log_file)
 assert_non_empty "$mark" 'ensure mark'
 assert_non_empty "$pane_id" 'ensure pane'

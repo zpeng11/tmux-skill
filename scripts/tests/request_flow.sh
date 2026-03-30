@@ -4,7 +4,7 @@ set -eu
 
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 ROOT_DIR=$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)
-ENSURE_SCRIPT="$ROOT_DIR/ensure_pane.sh"
+ADOPT_SCRIPT="$ROOT_DIR/adopt_pane.sh"
 WAIT_SCRIPT="$ROOT_DIR/wait_for_request.sh"
 RECOVER_SCRIPT="$ROOT_DIR/recover_pane.sh"
 SUBMIT_SCRIPT="$ROOT_DIR/submit_request.sh"
@@ -83,8 +83,8 @@ trap cleanup EXIT HUP INT TERM
 
 [ -n "${TMUX:-}" ] || fail 'this test must run inside tmux'
 
-ENSURE_JSON=$("$ENSURE_SCRIPT" --index "$INDEX" --new-window)
-PANE_ID=$(json_string_field "$ENSURE_JSON" pane_id)
+PANE_ID=$(tmux new-window -dP -F '#{pane_id}' -n "skill-$INDEX" -c "$PWD")
+ENSURE_JSON=$("$ADOPT_SCRIPT" --pane-id "$PANE_ID" --index "$INDEX")
 assert_non_empty "$PANE_ID" 'pane_id'
 
 WINDOW_ID=$(tmux display-message -p -t "$PANE_ID" '#{window_id}' 2>/dev/null || true)

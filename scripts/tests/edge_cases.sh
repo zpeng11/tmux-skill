@@ -7,7 +7,7 @@ set -eu
 
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 ROOT_DIR=$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)
-ENSURE_SCRIPT="$ROOT_DIR/ensure_pane.sh"
+ADOPT_SCRIPT="$ROOT_DIR/adopt_pane.sh"
 SUBMIT_SCRIPT="$ROOT_DIR/submit_request.sh"
 WAIT_SCRIPT="$ROOT_DIR/wait_for_request.sh"
 RECOVER_SCRIPT="$ROOT_DIR/recover_pane.sh"
@@ -89,21 +89,21 @@ trap cleanup EXIT HUP INT TERM
 [ -n "${TMUX:-}" ] || fail 'this test must run inside tmux'
 
 # ============================================================================
-# T1: ensure returns a ready pane (shell_state=idle on first return)
-# Verifies Fix 1 (Critical #2): ensure now waits for init hooks.
+# T1: adopt returns a ready pane (shell_state=idle on first return)
+# Verifies Fix 1 (Critical #2): adopt now waits for init hooks.
 # ============================================================================
-printf 'T1: ensure returns a ready pane ... '
+printf 'T1: adopt returns a ready pane ... '
 
-ENSURE_JSON=$("$ENSURE_SCRIPT" --index "$INDEX" --new-window)
-PANE_ID=$(json_string_field "$ENSURE_JSON" pane_id)
-assert_non_empty "$PANE_ID" 'T1 pane_id'
-
+PANE_ID=$(tmux new-window -dP -F '#{pane_id}' -n "skill-$INDEX" -c "$PWD")
 WINDOW_ID=$(tmux display-message -p -t "$PANE_ID" '#{window_id}' 2>/dev/null || true)
 assert_non_empty "$WINDOW_ID" 'T1 window_id'
 
+ENSURE_JSON=$("$ADOPT_SCRIPT" --pane-id "$PANE_ID" --index "$INDEX")
+assert_non_empty "$PANE_ID" 'T1 pane_id'
+
 # The key assertion: shell_state must already be idle (no extra wait needed)
 SHELL_STATE=$(tmux show-options -p -v -q -t "$PANE_ID" '@tmux_skill_shell_state' 2>/dev/null || true)
-assert_equals 'idle' "$SHELL_STATE" 'T1 shell_state after ensure'
+assert_equals 'idle' "$SHELL_STATE" 'T1 shell_state after adopt'
 
 printf 'ok\n'
 PASSED=$((PASSED + 1))
@@ -153,13 +153,13 @@ printf 'ok\n'
 PASSED=$((PASSED + 1))
 
 # ============================================================================
-# T4: ensure idempotent reuse returns existing pane
-# Verifies that calling ensure a second time with the same index reuses the
-# existing pane instead of creating a new one.
+# T4: adopt idempotent reuse returns existing pane
+# Verifies that calling adopt a second time with the same pane_id reuses the
+# existing managed pane instead of failing.
 # ============================================================================
-printf 'T4: ensure idempotent reuse ... '
+printf 'T4: adopt idempotent reuse ... '
 
-ENSURE_JSON_2=$("$ENSURE_SCRIPT" --index "$INDEX" --new-window)
+ENSURE_JSON_2=$("$ADOPT_SCRIPT" --pane-id "$PANE_ID" --index "$INDEX")
 PANE_ID_2=$(json_string_field "$ENSURE_JSON_2" pane_id)
 assert_equals "$PANE_ID" "$PANE_ID_2" 'T4 pane_id reuse'
 
