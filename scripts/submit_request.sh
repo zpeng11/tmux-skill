@@ -14,9 +14,9 @@ TMUX_SKILL_SEARCH_START_OFFSET=''
 show_help() {
   cat <<EOF
 Usage:
-  $PROGRAM_NAME --cmd COMMAND < ensure.json
+  $PROGRAM_NAME --cmd COMMAND < pane.json
 
-Read one ensure_pane.sh JSON object from standard input, submit one
+Read one managed pane JSON object from standard input, submit one
 single-line shell command to the managed pane, and return immediately with a
 request ticket.
 
@@ -30,10 +30,13 @@ Output JSON fields:
   mark                 Managed pane mark from stdin.
   pane_id              Managed pane ID from stdin.
   log_file             Managed pane log file from stdin.
-  request_id           Unique request ID when status=started.
-  search_start_offset  Byte offset from which result search may begin when
-                       status=started.
-  message              Optional failure detail.
+  request_id           Unique request ID. Set when status=started, otherwise
+                       null.
+  search_start_offset  Byte offset for efficient result lookup. Pass this
+                       value to wait_for_request.sh --search-start-offset.
+                       Set when status=started, otherwise null.
+  message              Failure or status detail. Set when status=busy or
+                       status=error, otherwise null.
 
 Exit codes:
   0    Request submitted.

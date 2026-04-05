@@ -15,18 +15,19 @@ SEARCH_START_OFFSET=0
 show_help() {
   cat <<EOF
 Usage:
-  $PROGRAM_NAME --request-id ID --timeout-seconds N [--search-start-offset M] < ensure.json
-  $PROGRAM_NAME --request-id ID --query-only [--search-start-offset M] < ensure.json
+  $PROGRAM_NAME --request-id ID --timeout-seconds N [--search-start-offset M] < pane.json
+  $PROGRAM_NAME --request-id ID --query-only [--search-start-offset M] < pane.json
 
-Read one ensure_pane.sh JSON object from standard input, then wait
+Read one managed pane JSON object from standard input, then wait
 for or query one managed request result.
 
 Options:
   --request-id ID        Managed request ID to observe.
   --timeout-seconds N    Positive integer timeout for polling.
   --query-only           Check once without blocking.
-  --search-start-offset  Optional non-negative byte offset from which to start
-                         searching the managed log. Default: 0.
+  --search-start-offset  Byte offset from submit_request.sh output for
+                         efficient log search. Use the search_start_offset
+                         value from the corresponding submit call. Default: 0.
   -h, --help             Show this help text and exit.
 
 Output JSON fields:
@@ -35,12 +36,15 @@ Output JSON fields:
   pane_id             Managed pane ID from stdin.
   log_file            Managed pane log file from stdin.
   request_id          Requested managed request ID.
-  exit_code           Command exit code when status=ok, otherwise null.
-  clean_start_offset  Byte offset immediately after the start sentinel when it
-                      has been observed, otherwise null.
-  clean_end_offset    Byte offset of the end sentinel prefix when status=ok,
+  exit_code           Shell command exit code. Set when status=ok, otherwise
+                      null.
+  clean_start_offset  Byte offset where command output begins (after the
+                      start marker). Set when the start marker is found,
                       otherwise null.
-  message             Optional failure detail.
+  clean_end_offset    Byte offset where command output ends (before the end
+                      marker). Set when status=ok, otherwise null.
+  message             Failure or status detail. Set when status is not "ok",
+                      otherwise null.
 
 Exit codes:
   0    The managed request completed.
